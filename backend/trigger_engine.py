@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import threading
 import time
+from logging import Logger, getLogger
 from typing import Callable, Dict, List, Tuple
 
 import keyboard
@@ -48,29 +49,35 @@ def _default_fire_callback(trigger: str, output: str) -> None:
     # Hook for tests – intentionally empty.
     return
 
-
-def safe_write(text: str, *, paste_delay: float = 0.05) -> None:
+def safe_write(text: str, *, paste_delay: float = 0.05, logger: Logger | None = None) -> None:
     """Safely send text to the active window."""
     if pyperclip is None:
         keyboard.write(text, delay=0)
         return
-
     try:
         previous = pyperclip.paste()
-    except Exception:
+    except Exception as exc:
+        if logger:
+            logger.warning("Clipboard read failed; falling back to keyboard write", exc_info=exc)
         keyboard.write(text, delay=0)
         return
     try:
         pyperclip.copy(text)
         time.sleep(paste_delay)
+        if pyperclip.paste() != text:
+            raise RuntimeError("Clipboard content mismatch")
         keyboard.send("ctrl+v")
         time.sleep(paste_delay)
+    except Exception as exc:  # pragma: no cover - depends on platform clipboard behavior
+        if logger:
+            logger.warning("Clipboard paste failed; falling back to direct typing", exc_info=exc)
+        keyboard.write(text, delay=0)
     finally:
         try:
             pyperclip.copy(previous)
-        except Exception:
-            pass
-
+        except Exception as exc:
+            if logger:
+                logger.debug("Failed to restore clipboard", exc_info=exc)
 
 class TriggerEngine:
     """Monitor keyboard events and expand matching triggers."""
@@ -82,6 +89,7 @@ class TriggerEngine:
         cooldown: float = 0.3,
         paste_delay: float = 0.05,
         fire_callback: Callable[[str, str], None] = _default_fire_callback,
+        logger: Logger | None = None,
     ) -> None:
         self._hotkeys: Dict[str, str] = hotkeys or {}
         self._sorted_triggers: List[Tuple[str, str]] = []
@@ -101,6 +109,7 @@ class TriggerEngine:
         self._thread: threading.Thread | None = None
         self._hooked = False
         self._fired_count = 0
+        self._logger = logger or getLogger("openkeyflow")
 
         self.update_hotkeys(self._hotkeys)
 
@@ -142,6 +151,10 @@ class TriggerEngine:
         with self._lock:
             self._paste_delay = max(0.0, paste_delay)
 
+    def set_logger(self, logger: Logger) -> None:
+        with self._lock:
+            self._logger = logger
+
     def get_stats(self) -> Dict[str, int]:
         with self._lock:
             return {"fired": self._fired_count}
@@ -157,59 +170,65 @@ class TriggerEngine:
         keyboard.wait()
 
     def _handle_event(self, event) -> None:
-        if event.event_type not in ("down", "up"):
-            return
+        try:
+            if event.event_type not in ("down", "up"):
+                return
 
-        name = (event.name or "").lower()
+            name = (event.name or "").lower()
 
-        if name in SHIFT_KEYS:
-            self._shift_active = event.event_type == "down"
-            return
+            if name in SHIFT_KEYS:
+                self._shift_active = event.event_type == "down"
+                return
 
-        if name == "caps lock" and event.event_type == "down":
-            self._caps_lock = not self._caps_lock
-            return
+            if name == "caps lock" and event.event_type == "down":
+                self._caps_lock = not self._caps_lock
+                return
 
-        if event.event_type != "down":
-            return
+            if event.event_type != "down":
+                return
 
-        fired: Tuple[str, str] | None = None
+            fired: Tuple[str, str] | None = None
 
-        with self._lock:
-            if not self._enabled or self._suppress_events or not self._sorted_triggers:
+            with self._lock:
+                if not self._enabled or self._suppress_events or not self._sorted_triggers:
+                    if name == "backspace":
+                        self._buffer = self._buffer[:-1]
+                    return
+
                 if name == "backspace":
                     self._buffer = self._buffer[:-1]
-                return
+                    return
 
-            if name == "backspace":
-                self._buffer = self._buffer[:-1]
-                return
+                char = self._translate_key(name)
+                if char is None:
+                    return
 
-            char = self._translate_key(name)
-            if char is None:
-                return
+                if char in WHITESPACE:
+                    self._buffer = ""
+                    return
 
-            if char in WHITESPACE:
-                self._buffer = ""
-                return
+                self._buffer = (self._buffer + char)[-self._max_len :]
 
-            self._buffer = (self._buffer + char)[-self._max_len :]
+                match = self._find_match_locked()
+                if match is None:
+                    return
 
-            match = self._find_match_locked()
-            if match is None:
-                return
+                trigger, output = match
+                now = time.time()
+                if now - self._last_fire < self._cooldown:
+                    return
 
-            trigger, output = match
-            now = time.time()
-            if now - self._last_fire < self._cooldown:
-                return
+                self._last_fire = now
+                fired = self._fire_locked(trigger, output)
 
-            self._last_fire = now
-            fired = self._fire_locked(trigger, output)
-
-        if fired is not None:
-            fired_trigger, fired_output = fired
-            self._fire_callback(fired_trigger, fired_output)
+            if fired is not None:
+                fired_trigger, fired_output = fired
+                self._fire_callback(fired_trigger, fired_output)
+        except Exception as exc:  # pragma: no cover - runtime safety net
+            try:
+                self._logger.exception("Trigger engine error", exc_info=exc)
+            except Exception:
+                pass
 
     def _find_match_locked(self) -> Tuple[str, str] | None:
         for trigger, output in self._sorted_triggers:
@@ -223,7 +242,7 @@ class TriggerEngine:
             for _ in range(len(trigger)):
                 keyboard.send("backspace")
                 time.sleep(self._paste_delay)
-            safe_write(output, paste_delay=self._paste_delay)
+            safe_write(output, paste_delay=self._paste_delay, logger=self._logger)
             self._buffer = ""
             self._fired_count += 1
             return trigger, output

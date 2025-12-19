@@ -4,14 +4,15 @@ from __future__ import annotations
 import os
 import sys
 import threading
+from logging import Logger
 from pathlib import Path
 from typing import Dict
 
 import keyboard
-from PIL import Image, ImageDraw, ImageFont
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from backend import storage
+from backend.logging_utils import configure_logging, get_logger
 from backend.trigger_engine import TriggerEngine
 
 try:
@@ -46,9 +47,8 @@ class HotkeyFilter(QtCore.QSortFilterProxyModel):
 
 
 def make_status_icon(enabled: bool) -> QtGui.QIcon:
-
     color = QtGui.QColor("#2ecc71" if enabled else "#e74c3c")
-    
+
     pixmap = QtGui.QPixmap(64, 64)
     pixmap.fill(QtCore.Qt.transparent)
 
@@ -61,17 +61,6 @@ def make_status_icon(enabled: bool) -> QtGui.QIcon:
     painter.end()
 
     return QtGui.QIcon(pixmap)
-    img = Image.new("RGB", (64, 64), "white")
-    draw = ImageDraw.Draw(img)
-    draw.rectangle((8, 8, 56, 56), fill="lightgray", outline="black")
-    try:
-        font = ImageFont.load_default()
-    except Exception:  # pragma: no cover
-        font = None
-    draw.text((20, 22), "KF", fill="black", font=font)
-    qimg = QtGui.QImage(img.tobytes(), img.size[0], img.size[1], QtGui.QImage.Format_RGB888)
-    pix = QtGui.QPixmap.fromImage(qimg)
-    return QtGui.QIcon(pix)
 
 
 def set_app_palette(dark: bool) -> None:
@@ -81,39 +70,53 @@ def set_app_palette(dark: bool) -> None:
 
     palette = QtGui.QPalette()
     if dark:
-        palette.setColor(QtGui.QPalette.Window, QtGui.QColor(30, 30, 30))
+        palette.setColor(QtGui.QPalette.Window, QtGui.QColor(22, 24, 30))
         palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
-        palette.setColor(QtGui.QPalette.Base, QtGui.QColor(37, 37, 38))
-        palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(45, 45, 48))
+        palette.setColor(QtGui.QPalette.Base, QtGui.QColor(30, 32, 40))
+        palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(42, 44, 54))
         palette.setColor(QtGui.QPalette.ToolTipBase, QtCore.Qt.white)
         palette.setColor(QtGui.QPalette.ToolTipText, QtCore.Qt.white)
         palette.setColor(QtGui.QPalette.Text, QtCore.Qt.white)
-        palette.setColor(QtGui.QPalette.Button, QtGui.QColor(0, 0, 0))
-        palette.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(255, 51, 51))
-        palette.setColor(QtGui.QPalette.PlaceholderText, QtGui.QColor(255, 120, 120))
-        palette.setColor(QtGui.QPalette.BrightText, QtGui.QColor(224, 224, 224))
-        palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(0, 122, 204))
+        palette.setColor(QtGui.QPalette.Button, QtGui.QColor(36, 38, 48))
+        palette.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(255, 115, 115))
+        palette.setColor(QtGui.QPalette.PlaceholderText, QtGui.QColor(255, 170, 170))
+        palette.setColor(QtGui.QPalette.BrightText, QtGui.QColor(255, 255, 255))
+        palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(255, 99, 132))
         palette.setColor(QtGui.QPalette.HighlightedText, QtCore.Qt.white)
-        app.setPalette(palette)  
+        app.setPalette(palette)
         app.setStyleSheet(
             """
-            QPushButton {
-                background-color: black;
-                color: rgb(255, 51, 51);
+            QPushButton, QToolButton {
+                background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #2c2f3b, stop:1 #ff4d4f);
+                color: white;
+                border: 1px solid #ff8080;
+                border-radius: 4px;
+                padding: 4px 8px;
             }
-            QPushButton:disabled {
-                background-color: rgb(45, 45, 45);
-                color: rgba(255, 51, 51, 140);
+            QPushButton:hover, QToolButton:hover {
+                background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #ff5f6d, stop:1 #ffc371);
+                color: #1c1c1c;
+            }
+            QPushButton:disabled, QToolButton:disabled {
+                background-color: #2d2d2d;
+                color: rgba(255, 255, 255, 0.6);
+                border: 1px solid #555;
             }
             QLineEdit, QPlainTextEdit, QTextEdit {
-                background-color: black;
-                color: rgb(255, 51, 51);
-                selection-background-color: rgb(80, 80, 80);
-                selection-color: white;
+                background-color: #1f2128;
+                color: #ffcccc;
+                selection-background-color: #ff5f6d;
+                selection-color: #1c1c1c;
+                border: 1px solid #ff8080;
+                border-radius: 4px;
+                padding: 2px 4px;
             }
-            QLineEdit:disabled, QPlainTextEdit:disabled, QTextEdit:disabled {
-                background-color: rgb(45, 45, 45);
-                color: rgba(255, 51, 51, 140);
+            QHeaderView::section {
+                background-color: #1f1f24;
+                color: #ff7b7b;
+                border: 1px solid #ff8080;
             }
             """
         )
@@ -128,31 +131,50 @@ def startup_shortcut_path() -> Path:
     return startup_dir / f"{APP_NAME}.lnk"
 
 
-def toggle_autostart(parent: QtWidgets.QWidget) -> None:
-    if Dispatch is None:
-        QtWidgets.QMessageBox.warning(parent, "Autostart", "pywin32 is not available on this system.")
-        return
+def autostart_supported() -> bool:
+    return sys.platform.startswith("win") and Dispatch is not None
+
+
+def is_autostart_enabled() -> bool:
+    return autostart_supported() and startup_shortcut_path().exists()
+
+
+def set_autostart_enabled(parent: QtWidgets.QWidget, enabled: bool) -> bool:
+    if not autostart_supported():
+        QtWidgets.QMessageBox.information(
+            parent,
+            "Autostart",
+            "Autostart shortcuts are only supported on Windows for now.",
+        )
+        return False
+
     shortcut = startup_shortcut_path()
-    if shortcut.exists():
-        try:
-            shortcut.unlink()
-            QtWidgets.QMessageBox.information(parent, "Autostart", "Autostart disabled.")
-        except Exception as exc:  # pragma: no cover - Windows only
-            QtWidgets.QMessageBox.warning(parent, "Autostart", f"Failed to remove shortcut:\n{exc}")
-    else:
-        try:
-            shortcut.parent.mkdir(parents=True, exist_ok=True)
-            shell = Dispatch("WScript.Shell")
-            link = shell.CreateShortcut(str(shortcut))
-            link.TargetPath = str(Path(sys.executable))
-            script_path = Path(__file__).resolve().parent / "main.py"
-            link.Arguments = str(script_path)
-            link.WorkingDirectory = str(Path(__file__).resolve().parent)
-            link.IconLocation = link.TargetPath
-            link.save()
-            QtWidgets.QMessageBox.information(parent, "Autostart", "Autostart enabled.")
-        except Exception as exc:  # pragma: no cover
-            QtWidgets.QMessageBox.warning(parent, "Autostart", f"Failed to create shortcut:\n{exc}")
+    if not enabled:
+        if shortcut.exists():
+            try:
+                shortcut.unlink()
+                QtWidgets.QMessageBox.information(parent, "Autostart", "Autostart disabled.")
+                return True
+            except Exception as exc:  # pragma: no cover - Windows only
+                QtWidgets.QMessageBox.warning(parent, "Autostart", f"Failed to remove shortcut:\n{exc}")
+                return False
+        return True
+
+    try:
+        shortcut.parent.mkdir(parents=True, exist_ok=True)
+        shell = Dispatch("WScript.Shell")
+        link = shell.CreateShortcut(str(shortcut))
+        link.TargetPath = str(Path(sys.executable))
+        script_path = Path(__file__).resolve().parent / "main.py"
+        link.Arguments = str(script_path)
+        link.WorkingDirectory = str(Path(__file__).resolve().parent)
+        link.IconLocation = link.TargetPath
+        link.save()
+        QtWidgets.QMessageBox.information(parent, "Autostart", "Autostart enabled.")
+        return True
+    except Exception as exc:  # pragma: no cover
+        QtWidgets.QMessageBox.warning(parent, "Autostart", f"Failed to create shortcut:\n{exc}")
+        return False
 
 
 class SpecialAddDialog(QtWidgets.QDialog):
@@ -173,10 +195,20 @@ class SpecialAddDialog(QtWidgets.QDialog):
         self.trigger_edit.setPlaceholderText("Trigger (no spaces)")
         form_layout.addRow("Trigger:", self.trigger_edit)
 
+        self.tab_widget = QtWidgets.QTabWidget()
         self.output_edit = QtWidgets.QPlainTextEdit()
         self.output_edit.setPlaceholderText("Expansion output (supports multiple lines)")
         self.output_edit.setMinimumHeight(160)
-        form_layout.addRow("Output:", self.output_edit)
+
+        self.code_edit = QtWidgets.QPlainTextEdit()
+        self.code_edit.setPlaceholderText("Code block (will be wrapped for you)")
+        self.code_edit.setMinimumHeight(160)
+        fixed_font = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
+        self.code_edit.setFont(fixed_font)
+
+        self.tab_widget.addTab(self.output_edit, "Text")
+        self.tab_widget.addTab(self.code_edit, "Code block")
+        form_layout.addRow("Output:", self.tab_widget)
         layout.addLayout(form_layout)
 
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel | QtWidgets.QDialogButtonBox.Ok)
@@ -185,11 +217,19 @@ class SpecialAddDialog(QtWidgets.QDialog):
         layout.addWidget(buttons)
 
     def get_data(self) -> tuple[str, str]:
+        current_index = self.tab_widget.currentIndex()
+        if current_index == 1:
+            content = self.code_edit.toPlainText()
+            if content.strip():
+                wrapped = content
+                if not content.strip().startswith("```"):
+                    wrapped = f"```\n{content}\n```"
+                return self.trigger_edit.text(), wrapped
         return self.trigger_edit.text(), self.output_edit.toPlainText()
 
     def accept(self) -> None:  # noqa: D401 - inherited docs
         trigger = self.trigger_edit.text().strip()
-        output = self.output_edit.toPlainText()
+        output = self.code_edit.toPlainText() if self.tab_widget.currentIndex() == 1 else self.output_edit.toPlainText()
         if not trigger or not output.strip():
             QtWidgets.QMessageBox.warning(self, "Special Add", "Trigger and output are required.")
             return
@@ -200,10 +240,126 @@ class SpecialAddDialog(QtWidgets.QDialog):
         super().accept()
 
 
+class SettingsDialog(QtWidgets.QDialog):
+    def __init__(self, parent: "MainWindow") -> None:  # type: ignore[name-defined]
+        super().__init__(parent)
+        self.window = parent
+        self.setWindowTitle("Settings")
+        self.setModal(True)
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        general_group = QtWidgets.QGroupBox("General")
+        general_layout = QtWidgets.QVBoxLayout(general_group)
+        self.autostart_checkbox = QtWidgets.QCheckBox("Launch OpenKeyFlow on startup (Windows)")
+        self.autostart_checkbox.setChecked(is_autostart_enabled())
+        self.autostart_checkbox.setEnabled(autostart_supported())
+        self.autostart_checkbox.toggled.connect(self._on_autostart_toggled)
+
+        self.dark_mode_checkbox = QtWidgets.QCheckBox("Enable dark mode")
+        self.dark_mode_checkbox.setChecked(self.window.dark_mode)
+        self.dark_mode_checkbox.toggled.connect(self._on_dark_mode_toggled)
+
+        general_layout.addWidget(self.autostart_checkbox)
+        if not autostart_supported():
+            hint = QtWidgets.QLabel("Autostart shortcuts are available on Windows systems.")
+            hint.setWordWrap(True)
+            general_layout.addWidget(hint)
+        general_layout.addWidget(self.dark_mode_checkbox)
+        layout.addWidget(general_group)
+
+        data_group = QtWidgets.QGroupBox("Data & Import/Export")
+        data_layout = QtWidgets.QHBoxLayout(data_group)
+        import_btn = QtWidgets.QPushButton("Import CSV")
+        export_btn = QtWidgets.QPushButton("Export CSV")
+        import_btn.clicked.connect(self.window.import_csv)
+        export_btn.clicked.connect(self.window.export_csv)
+        data_layout.addWidget(import_btn)
+        data_layout.addWidget(export_btn)
+        layout.addWidget(data_group)
+
+        logging_group = QtWidgets.QGroupBox("Diagnostics")
+        logging_layout = QtWidgets.QGridLayout(logging_group)
+        self.logging_checkbox = QtWidgets.QCheckBox("Enable debug logging")
+        self.logging_checkbox.setChecked(bool(self.window.config.get("logging_enabled", False)))
+        self.logging_checkbox.toggled.connect(self._on_logging_toggled)
+        logging_layout.addWidget(self.logging_checkbox, 0, 0, 1, 2)
+
+        self.log_path_edit = QtWidgets.QLineEdit(str(self.window.config.get("log_file", storage.default_log_path())))
+        self.log_path_edit.setPlaceholderText("Log file path")
+        self.browse_btn = QtWidgets.QPushButton("Choose…")
+        self.browse_btn.clicked.connect(self._on_choose_log_path)
+        logging_layout.addWidget(QtWidgets.QLabel("Log file:"), 1, 0)
+        logging_layout.addWidget(self.log_path_edit, 1, 1)
+        logging_layout.addWidget(self.browse_btn, 1, 2)
+        layout.addWidget(logging_group)
+
+        links_group = QtWidgets.QGroupBox("Links")
+        links_layout = QtWidgets.QHBoxLayout(links_group)
+        donate_btn = QtWidgets.QPushButton("Donate")
+        donate_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        donate_btn.clicked.connect(
+            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl("https://buymeacoffee.com/exoteriklabs"))
+        )
+        github_btn = QtWidgets.QPushButton("GitHub")
+        github_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        github_btn.clicked.connect(
+            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl("https://github.com/exoteriklabs"))
+        )
+        help_btn = QtWidgets.QPushButton("Help")
+        help_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        help_btn.clicked.connect(
+            lambda: QtGui.QDesktopServices.openUrl(
+                QtCore.QUrl("https://github.com/exoteriklabs/OpenKeyFlow/blob/main/README.md")
+            )
+        )
+        links_layout.addWidget(donate_btn)
+        links_layout.addWidget(github_btn)
+        links_layout.addWidget(help_btn)
+        layout.addWidget(links_group)
+
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        close_button = buttons.button(QtWidgets.QDialogButtonBox.Close)
+        if close_button:
+            close_button.setText("Close")
+        layout.addWidget(buttons)
+
+        self._update_logging_controls()
+
+    def _update_logging_controls(self) -> None:
+        enabled = self.logging_checkbox.isChecked()
+        self.log_path_edit.setEnabled(enabled)
+        self.browse_btn.setEnabled(enabled)
+
+    def _on_autostart_toggled(self, checked: bool) -> None:
+        success = self.window.update_autostart(checked)
+        if not success:
+            self.autostart_checkbox.blockSignals(True)
+            self.autostart_checkbox.setChecked(not checked)
+            self.autostart_checkbox.blockSignals(False)
+
+    def _on_dark_mode_toggled(self, checked: bool) -> None:
+        self.window.set_dark_mode(checked)
+
+    def _on_logging_toggled(self, checked: bool) -> None:
+        self.window.set_logging_enabled(checked, Path(self.log_path_edit.text()))
+        self._update_logging_controls()
+
+    def _on_choose_log_path(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Select log file", self.log_path_edit.text(), "Log files (*.log)")
+        if not path:
+            return
+        self.log_path_edit.setText(path)
+        self.window.set_logging_path(Path(path))
+        self._update_logging_controls()
+
+
 class MainWindow(QtWidgets.QMainWindow):
     updateCounters = QtCore.pyqtSignal()
 
-    def __init__(self, engine: TriggerEngine) -> None:
+    def __init__(self, engine: TriggerEngine, logger: Logger | None = None) -> None:
         super().__init__()
         self.engine = engine
         self.hotkeys: Dict[str, str] = storage.load_hotkeys()
@@ -211,10 +367,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dark_mode = bool(self.config.get("dark_mode", False))
         self.enabled = True
         self.hotkey_lock = threading.RLock()
+        self.logger: Logger = logger or get_logger()
+
+        self._allow_close = False
 
         self.engine.set_cooldown(float(self.config.get("cooldown", 0.3)))
         self.engine.set_paste_delay(float(self.config.get("paste_delay", 0.05)))
         self.engine.update_hotkeys(self.hotkeys)
+        self.engine.set_logger(self.logger)
 
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(760, 480)
@@ -230,15 +390,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.value_edit.setPlaceholderText("Expansion output")
         add_btn = QtWidgets.QPushButton("Add")
         delete_btn = QtWidgets.QPushButton("Delete Selected")
-        import_btn = QtWidgets.QPushButton("Import CSV")
-        export_btn = QtWidgets.QPushButton("Export CSV")
-        autostart_btn = QtWidgets.QPushButton("Toggle Autostart")
+        special_btn = QtWidgets.QPushButton("Special Add")
 
         add_btn.clicked.connect(self.add_hotkey)
         delete_btn.clicked.connect(self.delete_selected)
-        import_btn.clicked.connect(self.import_csv)
-        export_btn.clicked.connect(self.export_csv)
-        autostart_btn.clicked.connect(lambda: toggle_autostart(self))
+        special_btn.clicked.connect(self.open_special_add)
         self.key_edit.returnPressed.connect(self._handle_return_pressed)
         self.value_edit.returnPressed.connect(self._handle_return_pressed)
 
@@ -248,19 +404,13 @@ class MainWindow(QtWidgets.QMainWindow):
         input_row.addWidget(self.value_edit, 2)
         input_row.addWidget(add_btn)
         input_row.addWidget(delete_btn)
-        input_row.addWidget(import_btn)
-        input_row.addWidget(export_btn)
-        input_row.addWidget(autostart_btn)
+        input_row.addWidget(special_btn)
         layout.addLayout(input_row)
 
         search_row = QtWidgets.QHBoxLayout()
         self.search_edit = QtWidgets.QLineEdit()
         self.search_edit.setPlaceholderText("Search triggers or outputs…")
         search_row.addWidget(self.search_edit, 1)
-
-        self.theme_btn = QtWidgets.QPushButton("Toggle Dark Mode")
-        self.theme_btn.clicked.connect(self.toggle_theme)
-        search_row.addWidget(self.theme_btn)
         layout.addLayout(search_row)
 
         self.model = QtGui.QStandardItemModel(0, 2, self)
@@ -283,38 +433,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_table_header_theme()
 
         bottom_row = QtWidgets.QHBoxLayout()
-        donate_btn = QtWidgets.QPushButton("Donate")
-        donate_btn.setFixedSize(75, 20)
-        donate_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        donate_btn.clicked.connect(
-            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl("https://buymeacoffee.com/exoteriklabs"))
-        )
-        github_btn = QtWidgets.QPushButton("GitHub")
-        github_btn.setFixedSize(75, 20)
-        github_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        github_btn.clicked.connect(
-            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl("https://github.com/exoteriklabs"))
-        )
-
-        help_btn = QtWidgets.QPushButton("Help")
-        help_btn.setFixedSize(75, 20)
-        help_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        help_btn.clicked.connect(
-            lambda: QtGui.QDesktopServices.openUrl(
-                QtCore.QUrl("https://github.com/exoteriklabs/OpenKeyFlow/blob/main/README.md")
-            )
-        )
-
-
-        bottom_row.addWidget(donate_btn)
-        bottom_row.addWidget(github_btn)
-        bottom_row.addWidget(help_btn)
-        bottom_row.addSpacing(16)
-
         bottom_row.addWidget(QtWidgets.QLabel("Status:"))
         self.status_dot = QtWidgets.QLabel()
         self.status_dot.setFixedSize(16, 16)
         bottom_row.addWidget(self.status_dot)
+        self.state_label = QtWidgets.QLabel()
+        bottom_row.addWidget(self.state_label)
         bottom_row.addStretch(1)
 
         self.hotkey_count_label = QtWidgets.QLabel()
@@ -322,9 +446,20 @@ class MainWindow(QtWidgets.QMainWindow):
         bottom_row.addWidget(self.hotkey_count_label)
         bottom_row.addWidget(self.fired_count_label)
 
-        self.toggle_btn = QtWidgets.QPushButton("Disable")
+        self.toggle_btn = QtWidgets.QToolButton()
+        self.toggle_btn.setCheckable(True)
+        self.toggle_btn.setIconSize(QtCore.QSize(24, 24))
+        self.toggle_btn.setAutoRaise(True)
         self.toggle_btn.clicked.connect(self.toggle_enabled)
+        self.toggle_btn.setStyleSheet("QToolButton { background: transparent; border: none; padding: 0; }")
         bottom_row.addWidget(self.toggle_btn)
+
+        self.settings_btn = QtWidgets.QToolButton()
+        self.settings_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_FileDialogDetailedView))
+        self.settings_btn.setToolTip("Open settings")
+        self.settings_btn.setAutoRaise(True)
+        self.settings_btn.clicked.connect(self.open_settings)
+        bottom_row.addWidget(self.settings_btn)
 
         layout.addLayout(bottom_row)
 
@@ -341,6 +476,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tray.setIcon(make_status_icon(self.enabled))
         tray_menu = QtWidgets.QMenu()
         tray_menu.addAction("Toggle Enabled", self.toggle_enabled)
+        tray_menu.addAction("Settings", self.open_settings)
         tray_menu.addSeparator()
         tray_menu.addAction("Show/Hide", self.toggle_window_visibility)
         tray_menu.addAction("Quit", self.quit_app)
@@ -351,10 +487,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         keyboard.add_hotkey("ctrl+f12", self.toggle_enabled)
         self._was_hidden_to_tray = False
+        self.settings_dialog: SettingsDialog | None = None
+        self._tray_message_shown = False
 
         set_app_palette(self.dark_mode)
-        self.update_theme_button_text()
         self._apply_table_header_theme()
+        QtCore.QTimer.singleShot(200, self._maybe_show_use_policy_prompt)
 
     # ------------------------------------------------------------------
     # UI helpers
@@ -370,12 +508,10 @@ class MainWindow(QtWidgets.QMainWindow):
         pixmap = QtGui.QPixmap(16, 16)
         pixmap.fill(QtGui.QColor("#2ecc71" if self.enabled else "#e74c3c"))
         self.status_dot.setPixmap(pixmap)
-        self.toggle_btn.setText("Disable" if self.enabled else "Enable")
-        self.toggle_btn.setStyleSheet(
-            "background-color: #2ecc71; color: black;"
-            if self.enabled
-            else "background-color: #e74c3c; color: #d9d9d9;"
-        )
+        self.state_label.setText("Enabled" if self.enabled else "Disabled")
+        self.toggle_btn.setChecked(self.enabled)
+        self.toggle_btn.setIcon(make_status_icon(self.enabled))
+        self.toggle_btn.setToolTip("Click to disable hotkeys" if self.enabled else "Click to enable hotkeys")
         if self.tray is not None:
             self.tray.setIcon(make_status_icon(self.enabled))
 
@@ -383,11 +519,57 @@ class MainWindow(QtWidgets.QMainWindow):
         header = self.table.horizontalHeader()
         if self.dark_mode:
             header.setStyleSheet(
-                "QHeaderView::section { background-color: black; color: rgb(255, 51, 51); }"
+                "QHeaderView::section { background-color: #1f1f24; color: #ff7b7b; border: 1px solid #ff8080; }"
             )
         else:
             header.setStyleSheet("")
-            
+
+    def set_dark_mode(self, enabled: bool) -> None:
+        self.dark_mode = enabled
+        set_app_palette(self.dark_mode)
+        self._apply_table_header_theme()
+        self.config["dark_mode"] = self.dark_mode
+        storage.save_config(self.config)
+
+    def set_logging_enabled(self, enabled: bool, path: Path | None = None) -> None:
+        log_path = Path(path) if path else Path(self.config.get("log_file", storage.default_log_path()))
+        self.config["logging_enabled"] = enabled
+        self.config["log_file"] = str(log_path)
+        storage.save_config(self.config)
+        try:
+            configure_logging(enabled, log_path)
+            self.logger = get_logger()
+            self.engine.set_logger(self.logger)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Logging",
+                f"Failed to configure logging at {log_path}:\n{exc}",
+            )
+            self.config["logging_enabled"] = False
+            storage.save_config(self.config)
+
+    def set_logging_path(self, path: Path) -> None:
+        self.config["log_file"] = str(path)
+        storage.save_config(self.config)
+        try:
+            configure_logging(bool(self.config.get("logging_enabled", False)), path)
+            self.logger = get_logger()
+            self.engine.set_logger(self.logger)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Logging",
+                f"Failed to set log path to {path}:\n{exc}",
+            )
+
+    def update_autostart(self, enabled: bool) -> bool:
+        return set_autostart_enabled(self, enabled)
+
+    def open_settings(self) -> None:
+        dialog = SettingsDialog(self)
+        dialog.exec_()
+
     def _maybe_show_use_policy_prompt(self) -> None:
         if self.config.get("accepted_use_policy"):
             return
@@ -416,9 +598,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.hotkey_count_label.setText(f"Hotkeys: {len(self.hotkeys)}")
         self.fired_count_label.setText(f"Fired: {fired}")
 
-    def update_theme_button_text(self) -> None:
-        self.theme_btn.setText("Dark Mode" if not self.dark_mode else "Light Mode")
-
     def toggle_window_visibility(self) -> None:
         if self.isVisible():
             self.hide()
@@ -445,11 +624,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.toggle_window_visibility()
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802
-        if self._was_hidden_to_tray:
+        if self._allow_close:
             event.accept()
             return
         self.hide()
         self._was_hidden_to_tray = True
+        if self.tray and not self._tray_message_shown:
+            self.tray.showMessage(APP_NAME, "OpenKeyFlow is still running in the system tray. Use Quit to exit.")
+            self._tray_message_shown = True
         event.ignore()
 
     def quit_app(self) -> None:
@@ -457,6 +639,7 @@ class MainWindow(QtWidgets.QMainWindow):
             keyboard.remove_hotkey("ctrl+f12")
         except Exception:
             pass
+        self._allow_close = True
         QtWidgets.QApplication.instance().quit()
 
     # ------------------------------------------------------------------
@@ -578,9 +761,4 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_status_ui()
 
     def toggle_theme(self) -> None:
-        self.dark_mode = not self.dark_mode
-        set_app_palette(self.dark_mode)
-        self.update_theme_button_text()
-        self._apply_table_header_theme()
-        self.config["dark_mode"] = self.dark_mode
-        storage.save_config(self.config)
+        self.set_dark_mode(not self.dark_mode)
