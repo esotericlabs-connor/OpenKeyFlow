@@ -1,24 +1,16 @@
 """Qt application window for OpenKeyFlow."""
 from __future__ import annotations
 
-import os
-import sys
 import threading
-from logging import Logger
 from pathlib import Path
 from typing import Dict
 
-import keyboard
+from PIL import Image, ImageDraw, ImageFont
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from backend import autostart
 from backend import storage
-from backend.logging_utils import configure_logging, get_logger
 from backend.trigger_engine import TriggerEngine
-
-try:
-    from win32com.client import Dispatch
-except Exception:  # pragma: no cover - optional dependency on Windows
-    Dispatch = None
 
 APP_NAME = "OpenKeyFlow"
 ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
@@ -124,58 +116,23 @@ def set_app_palette(dark: bool) -> None:
         app.setPalette(palette)
         app.setStyleSheet("")
 
-
-def startup_shortcut_path() -> Path:
-    appdata = Path(os.environ.get("APPDATA", ""))
-    startup_dir = appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
-    return startup_dir / f"{APP_NAME}.lnk"
-
-
-def autostart_supported() -> bool:
-    return sys.platform.startswith("win") and Dispatch is not None
-
-
-def is_autostart_enabled() -> bool:
-    return autostart_supported() and startup_shortcut_path().exists()
-
-
-def set_autostart_enabled(parent: QtWidgets.QWidget, enabled: bool) -> bool:
-    if not autostart_supported():
-        QtWidgets.QMessageBox.information(
-            parent,
-            "Autostart",
-            "Autostart shortcuts are only supported on Windows for now.",
-        )
-        return False
-
-    shortcut = startup_shortcut_path()
-    if not enabled:
-        if shortcut.exists():
-            try:
-                shortcut.unlink()
-                QtWidgets.QMessageBox.information(parent, "Autostart", "Autostart disabled.")
-                return True
-            except Exception as exc:  # pragma: no cover - Windows only
-                QtWidgets.QMessageBox.warning(parent, "Autostart", f"Failed to remove shortcut:\n{exc}")
-                return False
-        return True
-
-    try:
-        shortcut.parent.mkdir(parents=True, exist_ok=True)
-        shell = Dispatch("WScript.Shell")
-        link = shell.CreateShortcut(str(shortcut))
-        link.TargetPath = str(Path(sys.executable))
-        script_path = Path(__file__).resolve().parent / "main.py"
-        link.Arguments = str(script_path)
-        link.WorkingDirectory = str(Path(__file__).resolve().parent)
-        link.IconLocation = link.TargetPath
-        link.save()
-        QtWidgets.QMessageBox.information(parent, "Autostart", "Autostart enabled.")
-        return True
-    except Exception as exc:  # pragma: no cover
-        QtWidgets.QMessageBox.warning(parent, "Autostart", f"Failed to create shortcut:\n{exc}")
-        return False
-
+def toggle_autostart(parent: QtWidgets.QWidget) -> None:
+    enabled, error = autostart.status()
+    if error:
+        QtWidgets.QMessageBox.warning(parent, "Autostart", error)
+        return
+    if enabled:
+        success, message = autostart.disable()
+        if success:
+            QtWidgets.QMessageBox.information(parent, "Autostart", "Autostart disabled.")
+        else:
+            QtWidgets.QMessageBox.warning(parent, "Autostart", f"Failed to disable autostart:\n{message}")
+    else:
+        success, message = autostart.enable()
+        if success:
+            QtWidgets.QMessageBox.information(parent, "Autostart", "Autostart enabled.")
+        else:
+            QtWidgets.QMessageBox.warning(parent, "Autostart", f"Failed to enable autostart:\n{message}")
 
 class SpecialAddDialog(QtWidgets.QDialog):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
@@ -485,7 +442,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tray.setToolTip(APP_NAME)
         self.tray.show()
 
-        keyboard.add_hotkey("ctrl+f12", self.toggle_enabled)
+        if self.engine.hooks_available():
+            self.engine.add_hotkey("ctrl+f12", self.toggle_enabled)     
+
         self._was_hidden_to_tray = False
         self.settings_dialog: SettingsDialog | None = None
         self._tray_message_shown = False
@@ -636,7 +595,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def quit_app(self) -> None:
         try:
-            keyboard.remove_hotkey("ctrl+f12")
+            self.engine.remove_hotkey("ctrl+f12")
         except Exception:
             pass
         self._allow_close = True
@@ -761,4 +720,5 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_status_ui()
 
     def toggle_theme(self) -> None:
+        
         self.set_dark_mode(not self.dark_mode)

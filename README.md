@@ -1,5 +1,5 @@
 # OpenKeyFlow
-**Free, secure and open-source text expander for Windows (Mac/Linux apps coming soon!)**
+**Free, secure and open-source text expander for Windows, macOS, and Linux**
 <img width="500" height="322" alt="image" src="https://github.com/user-attachments/assets/0b5b2e0f-1b6f-47dd-9609-ff809f0ba85c" />
 ![Untitled video](https://github.com/user-attachments/assets/b29ec144-9a06-439b-bb69-61751eb96a90)
 ![Untitled video (1)](https://github.com/user-attachments/assets/b2a31e96-b284-47a7-9fc5-5bd6b69123c1)
@@ -34,18 +34,25 @@ D285C00096AC355C4C81D357D5CB578BE7F044C562270241B326C0D144427AA0
 - Data folder with .exe must reside in the same location.
 
 ### Requirements
-- Windows 10 or 11 (Mac/Linux requirements coming soon)
+- Windows 10/11, macOS, or Linux
 - Python 3.10+ (if running from source)  
 - Or download the pre-built `.exe` from [Releases](#)
 
 ### Running from Source
-1. Install dependencies:
+1. Install dependencies for your OS:
 
    ```bash
-   python -m pip install -r requirements.txt
+   # Windows
+   python -m pip install -r requirements-windows.txt
+
+   # Linux
+   python -m pip install -r requirements-linux.txt
+
+   # macOS
+   python -m pip install -r requirements-macos.txt
    ```
 
-2. Launch the GUI:
+2. Launch the GUI from the repository root (the folder that contains `requirements.txt`):
 
    ```bash
    # Console
@@ -54,6 +61,13 @@ D285C00096AC355C4C81D357D5CB578BE7F044C562270241B326C0D144427AA0
    # Module form (works same way)
    python -m app
    ```
+
+   > **Note:** Running `python app/main.py` directly will fail because it bypasses
+   > the package entry point and cannot resolve package imports.
+
+   > **Note:** On macOS/Linux, global keyboard hooks may require accessibility
+   > permissions or elevated privileges depending on your desktop environment.
+   > You can override the hook backend with `OPENKEYFLOW_HOOK_BACKEND=keyboard|pynput`.
    
 ### How to use it:
 <img width="566" height="122" alt="image" src="https://github.com/user-attachments/assets/78850a26-02e8-48ce-ae62-e8e7e212a556" />
@@ -94,5 +108,3 @@ If you have any questions/comments about the project, email me at github@connorm
 **OpenKeyFlow is distributed under the GNU GPL v3 license and intended for lawful, ethical use only.**
 
 © 2025 OpenKeyFlow — Made with ♥️ at ExoterikLabs
-
-

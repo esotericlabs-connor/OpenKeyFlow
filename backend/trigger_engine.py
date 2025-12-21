@@ -6,7 +6,7 @@ import time
 from logging import Logger, getLogger
 from typing import Callable, Dict, List, Tuple
 
-import keyboard
+from backend import hooks
 
 try:
     import pyperclip
@@ -49,24 +49,25 @@ def _default_fire_callback(trigger: str, output: str) -> None:
     # Hook for tests – intentionally empty.
     return
 
-def safe_write(text: str, *, paste_delay: float = 0.05, logger: Logger | None = None) -> None:
+def safe_write(text: str, backend: hooks.BaseHookBackend, *, paste_delay: float = 0.05) -> None:
+
     """Safely send text to the active window."""
     if pyperclip is None:
-        keyboard.write(text, delay=0)
+        backend.write(text)
         return
     try:
         previous = pyperclip.paste()
     except Exception as exc:
         if logger:
             logger.warning("Clipboard read failed; falling back to keyboard write", exc_info=exc)
-        keyboard.write(text, delay=0)
+        backend.write(text)
         return
     try:
         pyperclip.copy(text)
         time.sleep(paste_delay)
         if pyperclip.paste() != text:
             raise RuntimeError("Clipboard content mismatch")
-        keyboard.send("ctrl+v")
+        backend.send("ctrl+v")
         time.sleep(paste_delay)
     except Exception as exc:  # pragma: no cover - depends on platform clipboard behavior
         if logger:
@@ -99,16 +100,22 @@ class TriggerEngine:
         self._cooldown = cooldown
         self._paste_delay = paste_delay
         self._fire_callback = fire_callback
-
+        self._backend: hooks.BaseHookBackend | None = None
+        self._backend_error: str | None = None
         self._last_fire = 0.0
         self._suppress_events = False
         self._shift_active = False
-        self._caps_lock = keyboard.is_toggled("caps lock") if hasattr(keyboard, "is_toggled") else False
-
+        self._caps_lock = False
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._hooked = False
         self._fired_count = 0
+        try:
+            self._backend = hooks.get_backend()
+        except hooks.HookBackendUnavailable as exc:
+            self._backend_error = str(exc)
+        else:
+            self._caps_lock = self._backend.is_toggled("caps lock")
         self._logger = logger or getLogger("openkeyflow")
 
         self.update_hotkeys(self._hotkeys)
@@ -117,6 +124,8 @@ class TriggerEngine:
     # Public API
     # ------------------------------------------------------------------
     def start(self) -> None:
+        if self._backend is None:
+            return
         if self._thread and self._thread.is_alive():
             return
         self._thread = threading.Thread(target=self._run, name="TriggerEngine", daemon=True)
@@ -158,6 +167,22 @@ class TriggerEngine:
     def get_stats(self) -> Dict[str, int]:
         with self._lock:
             return {"fired": self._fired_count}
+        
+    def hooks_available(self) -> bool:
+        return self._backend is not None
+
+    def hooks_error(self) -> str | None:
+        return self._backend_error
+
+    def add_hotkey(self, hotkey: str, callback: Callable[[], None]) -> None:
+        if self._backend is None:
+            return
+        self._backend.add_hotkey(hotkey, callback)
+
+    def remove_hotkey(self, hotkey: str) -> None:
+        if self._backend is None:
+            return
+        self._backend.remove_hotkey(hotkey)
 
     # ------------------------------------------------------------------
     # Internal logic
@@ -165,9 +190,12 @@ class TriggerEngine:
     def _run(self) -> None:
         if self._hooked:
             return
-        keyboard.hook(self._handle_event)
+        if self._backend is None:
+            return
+        self._backend.start(self._handle_event)
+
+
         self._hooked = True
-        keyboard.wait()
 
     def _handle_event(self, event) -> None:
         try:
@@ -240,9 +268,13 @@ class TriggerEngine:
         self._suppress_events = True
         try:
             for _ in range(len(trigger)):
-                keyboard.send("backspace")
+                if self._backend is None:
+                    break
+                self._backend.send("backspace")
                 time.sleep(self._paste_delay)
-            safe_write(output, paste_delay=self._paste_delay, logger=self._logger)
+            if self._backend is None:
+                return None
+            safe_write(output, self._backend, paste_delay=self._paste_delay)
             self._buffer = ""
             self._fired_count += 1
             return trigger, output

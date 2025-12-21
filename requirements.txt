@@ -1,6 +1,3 @@
-keyboard
-pystray
-pyperclip
 PyQt5
-platformdirs
-pywin32; platform_system == "Windows"
+pyperclip
+Pillow

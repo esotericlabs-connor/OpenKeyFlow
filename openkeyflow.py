@@ -2,18 +2,27 @@
 from __future__ import annotations
 
 import importlib.util
+import platform
 import sys
-
+from backend import hooks
 
 def _ensure_dependencies() -> None:
-    missing = [
-        name
-        for name in ("PyQt5", "keyboard", "pyperclip")
-        if importlib.util.find_spec(name) is None
-    ]
+
+    required = ["PyQt5", "pyperclip", *hooks.required_packages()]
+    missing = [name for name in required if importlib.util.find_spec(name) is None]
+
     if missing:
         joined = ", ".join(sorted(set(missing)))
-        command = f"{sys.executable} -m pip install -r requirements.txt"
+        backend_name = hooks.selected_backend_name()
+        requirements_file = "requirements.txt"
+        if backend_name == "keyboard":
+            requirements_file = "requirements-windows.txt"
+        elif backend_name == "pynput":
+            if platform.system() == "Darwin":
+                requirements_file = "requirements-macos.txt"
+            else:
+                requirements_file = "requirements-linux.txt"
+        command = f"{sys.executable} -m pip install -r {requirements_file}"
         sys.stderr.write(
             "Required packages missing: "
             f"{joined}.\n"
@@ -21,7 +30,6 @@ def _ensure_dependencies() -> None:
             f"  {command}\n"
         )
         sys.exit(1)
-
 
 def main() -> None:
     _ensure_dependencies()
