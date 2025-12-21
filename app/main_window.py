@@ -5,18 +5,20 @@ import threading
 from pathlib import Path
 from typing import Dict
 
+import logging
+
 from PIL import Image, ImageDraw, ImageFont
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from backend import autostart
 from backend import storage
+from backend.logging_utils import configure_logging, get_logger
 from backend.trigger_engine import TriggerEngine
 
 APP_NAME = "OpenKeyFlow"
 ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
 ACTIVE_ICON_PATH = ASSETS_DIR / "OpenKeyFlow_active.ico"
 IDLE_ICON_PATH = ASSETS_DIR / "OpenKeyFlow_idle.ico"
-
 
 class HotkeyFilter(QtCore.QSortFilterProxyModel):
     def __init__(self) -> None:
