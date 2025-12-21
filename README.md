@@ -1,5 +1,5 @@
 # OpenKeyFlow
-**Free, secure and open-source text expander for Windows, macOS, and Linux**
+**Free, secure and open-source text expander for Windows, MacOS, and Linux**
 <img width="500" height="322" alt="image" src="https://github.com/user-attachments/assets/0b5b2e0f-1b6f-47dd-9609-ff809f0ba85c" />
 ![Untitled video](https://github.com/user-attachments/assets/b29ec144-9a06-439b-bb69-61751eb96a90)
 ![Untitled video (1)](https://github.com/user-attachments/assets/b2a31e96-b284-47a7-9fc5-5bd6b69123c1)
@@ -61,6 +61,32 @@ D285C00096AC355C4C81D357D5CB578BE7F044C562270241B326C0D144427AA0
    # Module form (works same way)
    python -m app
    ```
+   ### Linux (Global Hotkeys)
+
+   OpenKeyFlow uses `pynput` with `evdev` on Linux.
+
+   Required system packages:
+   - build-essential
+   - python3-dev
+   - libevdev-dev
+   - libudev-dev
+   - linux headers
+
+   Required permissions:
+   ```
+   sudo usermod -aG input $USER
+   (log out/in required)
+   ```
+
+   ### macOS (Global Hotkeys)
+
+   Note: OpenKeyFlow requires privacy permissions to monitor global hotkeys on macOS.
+
+   Required permissions:
+   - System Settings -> Privacy & Security -> Input Monitoring
+   - System Settings -> Privacy & Security -> Accessibility
+
+   After granting permissions, restart the app if hotkeys do not register.
 
    > **Note:** Running `python app/main.py` directly will fail because it bypasses
    > the package entry point and cannot resolve package imports.
