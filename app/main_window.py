@@ -20,6 +20,29 @@ ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
 ACTIVE_ICON_PATH = ASSETS_DIR / "OpenKeyFlow_active.ico"
 IDLE_ICON_PATH = ASSETS_DIR / "OpenKeyFlow_idle.ico"
 
+def autostart_supported() -> bool:
+    _, error = autostart.status()
+    return error is None
+
+def is_autostart_enabled() -> bool:
+    enabled, error = autostart.status()
+    if error:
+        return False
+    return enabled
+
+def set_autostart_enabled(parent: QtWidgets.QWidget, enabled: bool) -> bool:
+    if enabled:
+        success, message = autostart.enable()
+    else:
+        success, message = autostart.disable()
+    if not success:
+        QtWidgets.QMessageBox.warning(
+            parent,
+            "Autostart",
+            message or "Autostart is not supported on this platform.",
+        )
+    return success
+
 class HotkeyFilter(QtCore.QSortFilterProxyModel):
     def __init__(self) -> None:
         super().__init__()
@@ -39,7 +62,6 @@ class HotkeyFilter(QtCore.QSortFilterProxyModel):
         output = (model.data(val_idx, QtCore.Qt.DisplayRole) or "").lower()
         return self.query in trigger or self.query in output
 
-
 def make_status_icon(enabled: bool) -> QtGui.QIcon:
     color = QtGui.QColor("#2ecc71" if enabled else "#e74c3c")
 
@@ -55,7 +77,6 @@ def make_status_icon(enabled: bool) -> QtGui.QIcon:
     painter.end()
 
     return QtGui.QIcon(pixmap)
-
 
 def set_app_palette(dark: bool) -> None:
     app = QtWidgets.QApplication.instance()
@@ -198,7 +219,6 @@ class SpecialAddDialog(QtWidgets.QDialog):
         self.trigger_edit.setText(trigger)
         super().accept()
 
-
 class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, parent: "MainWindow") -> None:  # type: ignore[name-defined]
         super().__init__(parent)
@@ -210,7 +230,7 @@ class SettingsDialog(QtWidgets.QDialog):
 
         general_group = QtWidgets.QGroupBox("General")
         general_layout = QtWidgets.QVBoxLayout(general_group)
-        self.autostart_checkbox = QtWidgets.QCheckBox("Launch OpenKeyFlow on startup (Windows)")
+        self.autostart_checkbox = QtWidgets.QCheckBox("Launch OpenKeyFlow on startup")
         self.autostart_checkbox.setChecked(is_autostart_enabled())
         self.autostart_checkbox.setEnabled(autostart_supported())
         self.autostart_checkbox.toggled.connect(self._on_autostart_toggled)

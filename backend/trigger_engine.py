@@ -1,6 +1,7 @@
 """Keyboard trigger monitoring for OpenKeyFlow."""
 from __future__ import annotations
 
+import platform
 import threading
 import time
 from logging import Logger, getLogger
@@ -49,17 +50,23 @@ def _default_fire_callback(trigger: str, output: str) -> None:
     # Hook for tests – intentionally empty.
     return
 
-def safe_write(text: str, backend: hooks.BaseHookBackend, *, paste_delay: float = 0.05) -> None:
-
+def safe_write(
+    text: str,
+    backend: hooks.BaseHookBackend,
+    *,
+    paste_delay: float = 0.05,
+    logger: Logger | None = None,
+) -> None:
+    
     """Safely send text to the active window."""
+    log = logger or getLogger("openkeyflow")
     if pyperclip is None:
         backend.write(text)
         return
     try:
         previous = pyperclip.paste()
     except Exception as exc:
-        if logger:
-            logger.warning("Clipboard read failed; falling back to keyboard write", exc_info=exc)
+        log.warning("Clipboard read failed; falling back to direct typing", exc_info=exc)
         backend.write(text)
         return
     try:
@@ -67,18 +74,17 @@ def safe_write(text: str, backend: hooks.BaseHookBackend, *, paste_delay: float 
         time.sleep(paste_delay)
         if pyperclip.paste() != text:
             raise RuntimeError("Clipboard content mismatch")
-        backend.send("ctrl+v")
+        paste_hotkey = "cmd+v" if platform.system() == "Darwin" else "ctrl+v"
+        backend.send(paste_hotkey)
         time.sleep(paste_delay)
     except Exception as exc:  # pragma: no cover - depends on platform clipboard behavior
-        if logger:
-            logger.warning("Clipboard paste failed; falling back to direct typing", exc_info=exc)
-        keyboard.write(text, delay=0)
+        log.warning("Clipboard paste failed; falling back to direct typing", exc_info=exc)
+        backend.write(text)
     finally:
         try:
             pyperclip.copy(previous)
         except Exception as exc:
-            if logger:
-                logger.debug("Failed to restore clipboard", exc_info=exc)
+            log.debug("Failed to restore clipboard", exc_info=exc)
 
 class TriggerEngine:
     """Monitor keyboard events and expand matching triggers."""
@@ -274,7 +280,7 @@ class TriggerEngine:
                 time.sleep(self._paste_delay)
             if self._backend is None:
                 return None
-            safe_write(output, self._backend, paste_delay=self._paste_delay)
+            safe_write(output, self._backend, paste_delay=self._paste_delay, logger=self._logger)      
             self._buffer = ""
             self._fired_count += 1
             return trigger, output

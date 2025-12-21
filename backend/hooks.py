@@ -172,6 +172,7 @@ class PynputBackend(BaseHookBackend):
         return None
 
     def _to_key(self, name: str):
+        cmd_key = self._command_key()
         mapping = {
             "backspace": self._keyboard.Key.backspace,
             "space": self._keyboard.Key.space,
@@ -180,6 +181,10 @@ class PynputBackend(BaseHookBackend):
             "shift": self._keyboard.Key.shift,
             "ctrl": self._keyboard.Key.ctrl,
             "alt": self._keyboard.Key.alt,
+            "cmd": cmd_key,
+            "command": cmd_key,
+            "win": cmd_key,
+            "super": cmd_key,
         }
         if name in mapping:
             return mapping[name]
@@ -189,6 +194,11 @@ class PynputBackend(BaseHookBackend):
             return getattr(self._keyboard.Key, name)
         return None
 
+def _command_key(self):
+        for attr in ("cmd", "cmd_l", "cmd_r", "super", "super_l", "super_r"):
+            if hasattr(self._keyboard.Key, attr):
+                return getattr(self._keyboard.Key, attr)
+        return None
 
 def _default_backend_name() -> str:
     if platform.system() == "Windows":

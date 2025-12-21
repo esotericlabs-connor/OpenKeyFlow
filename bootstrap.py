@@ -6,12 +6,12 @@ import os
 import platform
 import sys
 from typing import Iterable, Sequence
+from backend import hooks
 
-REQUIRED_IMPORTS: Sequence[str] = (
+BASE_REQUIRED_IMPORTS: Sequence[str] = (
     "PyQt5",
-    "keyboard",
     "pyperclip",
-    "pystray",
+    "PIL",
 )
 
 LINUX_GLOBAL_HOTKEY_REQUIREMENTS: Sequence[str] = (
@@ -43,7 +43,8 @@ def _warn(message: str) -> None:
     sys.stderr.write(f"{message}\n")
 
 def _check_dependencies() -> None:
-    missing = [name for name in REQUIRED_IMPORTS if importlib.util.find_spec(name) is None]
+    required = list(BASE_REQUIRED_IMPORTS) + hooks.required_packages()
+    missing = [name for name in required if importlib.util.find_spec(name) is None]
     if missing:
         joined = ", ".join(sorted(set(missing)))
         _warn("Required packages missing:")
