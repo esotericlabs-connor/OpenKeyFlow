@@ -194,7 +194,7 @@ class PynputBackend(BaseHookBackend):
             return getattr(self._keyboard.Key, name)
         return None
 
-def _command_key(self):
+    def _command_key(self):
         for attr in ("cmd", "cmd_l", "cmd_r", "super", "super_l", "super_r"):
             if hasattr(self._keyboard.Key, attr):
                 return getattr(self._keyboard.Key, attr)
