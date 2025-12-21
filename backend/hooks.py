@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import platform
 import threading
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -28,7 +29,7 @@ class BaseHookBackend:
     def send(self, hotkey: str) -> None:  # pragma: no cover - interface only
         raise NotImplementedError
 
-    def write(self, text: str) -> None:  # pragma: no cover - interface only
+    def write(self, text: str, *, interval: float = 0.0) -> None:  # pragma: no cover - interface only
         raise NotImplementedError
 
     def is_toggled(self, key: str) -> bool:  # pragma: no cover - interface only
@@ -61,8 +62,8 @@ class KeyboardBackend(BaseHookBackend):
     def send(self, hotkey: str) -> None:
         self._keyboard.send(hotkey)
 
-    def write(self, text: str) -> None:
-        self._keyboard.write(text, delay=0)
+    def write(self, text: str, *, interval: float = 0.0) -> None:
+        self._keyboard.write(text, delay=max(0.0, interval))
 
     def is_toggled(self, key: str) -> bool:
         if hasattr(self._keyboard, "is_toggled"):
@@ -128,8 +129,13 @@ class PynputBackend(BaseHookBackend):
             for key_obj in reversed(pressed):
                 self._controller.release(key_obj)
 
-    def write(self, text: str) -> None:
-        self._controller.type(text)
+    def write(self, text: str, *, interval: float = 0.0) -> None:
+        if interval <= 0:
+            self._controller.type(text)
+            return
+        for char in text:
+            self._controller.type(char)
+            time.sleep(interval)
 
     def add_hotkey(self, hotkey: str, callback: Callable[[], None]) -> None:
         normalized = self._normalize_hotkey(hotkey)

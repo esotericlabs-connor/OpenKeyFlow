@@ -44,7 +44,7 @@ SHIFTED_SYMBOLS = {
     "\\": "|",
     "`": "~",
 }
-
+DIRECT_WRITE_INTERVAL = 0.003
 
 def _default_fire_callback(trigger: str, output: str) -> None:
     # Hook for tests – intentionally empty.
@@ -60,26 +60,26 @@ def safe_write(
     
     """Safely send text to the active window."""
     log = logger or getLogger("openkeyflow")
-    if pyperclip is None:
-        backend.write(text)
-        return
+    normalized = text.replace("\r\n", "\n")
+    if pyperclip is None or platform.system() == "Linux":
+        backend.write(normalized, interval=DIRECT_WRITE_INTERVAL)
     try:
         previous = pyperclip.paste()
     except Exception as exc:
         log.warning("Clipboard read failed; falling back to direct typing", exc_info=exc)
-        backend.write(text)
+        backend.write(normalized, interval=DIRECT_WRITE_INTERVAL)
         return
     try:
-        pyperclip.copy(text)
+        pyperclip.copy(normalized)
         time.sleep(paste_delay)
-        if pyperclip.paste() != text:
+        if pyperclip.paste() != normalized:
             raise RuntimeError("Clipboard content mismatch")
         paste_hotkey = "cmd+v" if platform.system() == "Darwin" else "ctrl+v"
         backend.send(paste_hotkey)
         time.sleep(paste_delay)
     except Exception as exc:  # pragma: no cover - depends on platform clipboard behavior
         log.warning("Clipboard paste failed; falling back to direct typing", exc_info=exc)
-        backend.write(text)
+        backend.write(normalized, interval=DIRECT_WRITE_INTERVAL)
     finally:
         try:
             pyperclip.copy(previous)
