@@ -211,13 +211,11 @@ def _default_backend_name() -> str:
         return "keyboard"
     return "pynput"
 
-
 def selected_backend_name() -> str:
     override = os.getenv("OPENKEYFLOW_HOOK_BACKEND")
     if override:
         return override.strip().lower()
     return _default_backend_name()
-
 
 def required_packages() -> list[str]:
     name = selected_backend_name()
@@ -226,7 +224,6 @@ def required_packages() -> list[str]:
     if name == "pynput":
         return ["pynput"]
     return []
-
 
 def get_backend() -> BaseHookBackend:
     name = selected_backend_name()
