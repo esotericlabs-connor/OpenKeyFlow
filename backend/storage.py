@@ -31,6 +31,7 @@ DEFAULT_CONFIG = {
     "accepted_use_policy": False,
     "logging_enabled": False,
     "log_file": str(DEFAULT_LOG_FILE),
+    "profile_colors": {},
 }
 
 DEFAULT_PROFILE_NAME = "main"
@@ -152,7 +153,7 @@ def save_hotkeys(hotkeys: Dict[str, str]) -> None:
     with HOTKEYS_FILE.open("w", encoding="utf-8") as f:
         json.dump(hotkeys, f, indent=4, ensure_ascii=False)
 
-def load_config() -> Dict[str, float]:
+def load_config() -> Dict[str, object]:
     ensure_data_dir()
     if CONFIG_FILE.exists():
         with CONFIG_FILE.open("r", encoding="utf-8") as f:
@@ -163,7 +164,7 @@ def load_config() -> Dict[str, float]:
         return merged
     return DEFAULT_CONFIG.copy()
 
-def save_config(config: Dict[str, float]) -> None:
+def save_config(config: Dict[str, object]) -> None:
     ensure_data_dir()
     merged = DEFAULT_CONFIG.copy()
     merged.update(config)

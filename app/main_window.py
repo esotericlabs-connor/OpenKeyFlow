@@ -160,6 +160,21 @@ def make_status_icon(enabled: bool) -> QtGui.QIcon:
     painter.end()
     return QtGui.QIcon(pixmap)
 
+def make_color_icon(color: QtGui.QColor, size: int = 12) -> QtGui.QIcon:
+    pixmap = QtGui.QPixmap(size, size)
+    pixmap.fill(QtCore.Qt.transparent)
+    painter = QtGui.QPainter(pixmap)
+    painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+    painter.setBrush(color)
+    painter.setPen(QtGui.QPen(QtGui.QColor(20, 20, 20, 120), 1))
+    painter.drawRoundedRect(0, 0, size - 1, size - 1, 3, 3)
+    painter.end()
+    return QtGui.QIcon(pixmap)
+
+def readable_text_color(color: QtGui.QColor) -> QtGui.QColor:
+    luminance = (0.299 * color.red()) + (0.587 * color.green()) + (0.114 * color.blue())
+    return QtGui.QColor("#1c1c1c" if luminance > 165 else "#ffffff")
+
 def make_gear_icon(palette: QtGui.QPalette, size: int = 18) -> QtGui.QIcon:
     pixmap = QtGui.QPixmap(size, size)
     pixmap.fill(QtCore.Qt.transparent)
@@ -342,10 +357,8 @@ class SettingsDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout(self)
 
-        section_title_style = "QGroupBox { font-weight: 600; }"
 
         general_group = QtWidgets.QGroupBox("General")
-        general_group.setStyleSheet(section_title_style)
         general_layout = QtWidgets.QVBoxLayout(general_group)
 
         self.autostart_checkbox = QtWidgets.QCheckBox("Launch OpenKeyFlow on startup")
@@ -366,7 +379,6 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addWidget(general_group)
 
         data_group = QtWidgets.QGroupBox("Data & Import/Export")
-        data_group.setStyleSheet(section_title_style)
         data_layout = QtWidgets.QHBoxLayout(data_group)
         import_btn = QtWidgets.QPushButton("Import CSV")
         export_btn = QtWidgets.QPushButton("Export CSV")
@@ -399,10 +411,28 @@ class SettingsDialog(QtWidgets.QDialog):
         profile_buttons_row.addWidget(delete_profile_btn)
         profile_buttons_row.addWidget(set_active_btn)
         profiles_layout.addLayout(profile_buttons_row)
+
+        profile_color_row = QtWidgets.QHBoxLayout()
+        self.profile_color_label = QtWidgets.QLabel("Profile color:")
+        self.profile_color_preview = QtWidgets.QFrame()
+        self.profile_color_preview.setFixedSize(18, 18)
+        self.profile_color_preview.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        self.profile_color_preview.setFrameShadow(QtWidgets.QFrame.Plain)
+
+        self.profile_color_btn = QtWidgets.QToolButton()
+        self.profile_color_btn.setText("Choose color")
+        self.profile_color_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.profile_color_btn.setMenu(self._build_profile_color_menu())
+
+        profile_color_row.addWidget(self.profile_color_label)
+        profile_color_row.addWidget(self.profile_color_preview)
+        profile_color_row.addWidget(self.profile_color_btn)
+        profile_color_row.addStretch(1)
+        profiles_layout.addLayout(profile_color_row)
+
         layout.addWidget(profiles_group)
 
         logging_group = QtWidgets.QGroupBox("Diagnostics")
-        logging_group.setStyleSheet(section_title_style)
         logging_layout = QtWidgets.QGridLayout(logging_group)
         self.logging_checkbox = QtWidgets.QCheckBox("Enable debug logging")
         self.logging_checkbox.setChecked(bool(self.window.config.get("logging_enabled", False)))
@@ -419,7 +449,6 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addWidget(logging_group)
 
         links_group = QtWidgets.QGroupBox("Links")
-        links_group.setStyleSheet(section_title_style)
         links_layout = QtWidgets.QHBoxLayout(links_group)
         donate_btn = QtWidgets.QPushButton("Donate")
         donate_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -452,12 +481,33 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addWidget(buttons)
 
         self._update_logging_controls()
+        self.section_groups = [
+            general_group,
+            data_group,
+            profiles_group,
+            logging_group,
+            links_group,
+        ]
+        self._apply_section_title_style()
         self.refresh_profiles()
+        self.profile_list.currentItemChanged.connect(self._on_profile_selection_changed)
+        self._refresh_profile_color_controls()
 
     def _update_logging_controls(self) -> None:
         enabled = self.logging_checkbox.isChecked()
         self.log_path_edit.setEnabled(enabled)
         self.browse_btn.setEnabled(enabled)
+
+    def _apply_section_title_style(self) -> None:
+        if self.window.dark_mode:
+            section_title_style = (
+                "QGroupBox { font-weight: 600; }"
+                "QGroupBox::title { color: #ffffff; font-weight: 600; }"
+            )
+        else:
+            section_title_style = "QGroupBox { font-weight: 600; }"
+        for group in self.section_groups:
+            group.setStyleSheet(section_title_style)
 
     def _on_autostart_toggled(self, checked: bool) -> None:
         success = self.window.update_autostart(checked)
@@ -488,13 +538,87 @@ class SettingsDialog(QtWidgets.QDialog):
             display = f"{name} (current)" if name == current else name
             item = QtWidgets.QListWidgetItem(display)
             item.setData(QtCore.Qt.UserRole, name)
+            color = self.window.profile_color(name)
+            if color:
+                swatch_color = QtGui.QColor(color)
+                item.setIcon(make_color_icon(swatch_color))
+                item.setForeground(QtGui.QBrush(swatch_color))
             self.profile_list.addItem(item)
+        self._refresh_profile_color_controls()
 
     def _selected_profile_name(self) -> str | None:
         item = self.profile_list.currentItem()
         if not item:
             return None
         return item.data(QtCore.Qt.UserRole)
+    
+    def _on_profile_selection_changed(
+        self, current: QtWidgets.QListWidgetItem | None, _: QtWidgets.QListWidgetItem | None
+    ) -> None:
+        self._refresh_profile_color_controls()
+
+    def _refresh_profile_color_controls(self) -> None:
+        profile_name = self._selected_profile_name() or self.window.current_profile
+        color = self.window.profile_color(profile_name)
+        if color:
+            self._set_color_preview(QtGui.QColor(color))
+        else:
+            self._set_color_preview(None)
+
+    def _set_color_preview(self, color: QtGui.QColor | None) -> None:
+        if color:
+            self.profile_color_preview.setStyleSheet(
+                f"QFrame {{ background-color: {color.name()}; border: 1px solid #555; }}"
+            )
+        else:
+            self.profile_color_preview.setStyleSheet("QFrame { background-color: transparent; border: 1px dashed #555; }")
+
+    def _build_profile_color_menu(self) -> QtWidgets.QMenu:
+        menu = QtWidgets.QMenu(self)
+        palette = [
+            ("Ruby", "#e74c3c"),
+            ("Coral", "#ff6b6b"),
+            ("Amber", "#f39c12"),
+            ("Lime", "#8bc34a"),
+            ("Teal", "#1abc9c"),
+            ("Sky", "#3498db"),
+            ("Indigo", "#5c6bc0"),
+            ("Violet", "#9b59b6"),
+            ("Slate", "#7f8c8d"),
+        ]
+        for name, hex_color in palette:
+            action = menu.addAction(name)
+            action.setData(hex_color)
+            action.setIcon(make_color_icon(QtGui.QColor(hex_color)))
+        menu.addSeparator()
+        clear_action = menu.addAction("Clear color")
+        clear_action.setData(None)
+        custom_action = menu.addAction("Custom…")
+        custom_action.setData("custom")
+        menu.triggered.connect(self._on_profile_color_selected)
+        return menu
+
+    def _on_profile_color_selected(self, action: QtWidgets.QAction) -> None:
+        profile_name = self._selected_profile_name() or self.window.current_profile
+        if not profile_name:
+            return
+        data = action.data()
+        if data == "custom":
+            current = self.window.profile_color(profile_name)
+            base = QtGui.QColor(current) if current else QtGui.QColor("#ff6b6b")
+            color = QtWidgets.QColorDialog.getColor(
+                base,
+                self,
+                "Select profile color",
+                QtWidgets.QColorDialog.ShowAlphaChannel,
+            )
+            if not color.isValid():
+                return
+            color_hex = color.name()
+        else:
+            color_hex = data
+        self.window.set_profile_color(profile_name, color_hex)
+        self.refresh_profiles()
 
     def _on_new_profile(self) -> None:
         if self.window.prompt_create_profile():
@@ -530,6 +654,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current_profile, self.profiles = storage.load_profiles()
         self.hotkeys: Dict[str, str] = dict(self.profiles.get(self.current_profile, {}))        
         self.config = storage.load_config()
+        self.profile_colors: Dict[str, str] = self._normalize_profile_colors(
+            self.config.get("profile_colors", {})
+        )
         self.dark_mode = bool(self.config.get("dark_mode", False))
         self.enabled = True
         self.hotkey_lock = threading.RLock()
@@ -711,8 +838,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dark_mode = enabled
         set_app_palette(self.dark_mode)
         self._apply_table_header_theme()
+        self._apply_profile_button_color()
         self.config["dark_mode"] = self.dark_mode
         storage.save_config(self.config)
+        if self.settings_dialog:
+            self.settings_dialog._apply_section_title_style()
 
     def set_logging_enabled(self, enabled: bool, path: Path | None = None) -> None:
         log_path = Path(path) if path else Path(self.config.get("log_file", storage.default_log_path()))
@@ -957,6 +1087,23 @@ class MainWindow(QtWidgets.QMainWindow):
     def profile_names(self) -> list[str]:
         return list(self.profiles.keys())
 
+    def profile_color(self, name: str) -> str | None:
+        color = self.profile_colors.get(name)
+        if isinstance(color, str) and color:
+            return color
+        return None
+
+    def set_profile_color(self, name: str, color: str | None) -> None:
+        if not name:
+            return
+        if color:
+            self.profile_colors[name] = color
+        else:
+            self.profile_colors.pop(name, None)
+        self.config["profile_colors"] = dict(self.profile_colors)
+        storage.save_config(self.config)
+        self._apply_profile_button_color()
+        self._sync_profile_ui()
 
     def _refresh_profile_combo(self) -> None:
         self._refresh_profile_menu()
@@ -966,10 +1113,14 @@ class MainWindow(QtWidgets.QMainWindow):
         for name in self.profile_names():
             action = self.profile_menu.addAction(name)
             action.setData(name)
+            color = self.profile_color(name)
+            if color:
+                action.setIcon(make_color_icon(QtGui.QColor(color)))
         self.profile_menu.addSeparator()
         add_action = self.profile_menu.addAction("Add new profile…")
         add_action.setData(None)
         self.profile_button.setText(f"Profile: {self.current_profile}")
+        self._apply_profile_button_color()
 
     def _sync_profile_ui(self) -> None:
         self._refresh_profile_menu()
@@ -1005,6 +1156,44 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profiles[self.current_profile] = dict(self.hotkeys)
         storage.save_profiles(self.current_profile, self.profiles)
 
+        def _normalize_profile_colors(self, colors: object) -> Dict[str, str]:
+            if not isinstance(colors, dict):
+                return {}
+        normalized: Dict[str, str] = {}
+        for name, value in colors.items():
+            if isinstance(name, str) and isinstance(value, str) and value.strip():
+                normalized[name] = value.strip()
+        return normalized
+
+    def _apply_profile_button_color(self) -> None:
+        color_hex = self.profile_color(self.current_profile)
+        if not color_hex:
+            self.profile_button.setStyleSheet("")
+            return
+        color = QtGui.QColor(color_hex)
+        text_color = readable_text_color(color)
+        hover_color = color.lighter(115)
+        pressed_color = color.darker(115)
+        self.profile_button.setStyleSheet(
+            (
+                "QPushButton {"
+                f"background-color: {color.name()};"
+                f"color: {text_color.name()};"
+                f"border: 1px solid {pressed_color.name()};"
+                "border-radius: 4px;"
+                "padding: 4px 8px;"
+                "}"
+                "QPushButton:hover {"
+                f"background-color: {hover_color.name()};"
+                f"color: {text_color.name()};"
+                "}"
+                "QPushButton:pressed {"
+                f"background-color: {pressed_color.name()};"
+                f"color: {text_color.name()};"
+                "}"
+            )
+        )
+
     def _normalize_profile_name(self, name: str) -> str:
         return name.strip()
 
@@ -1020,6 +1209,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current_profile = name
         self.hotkeys = {}
         self.engine.update_hotkeys(self.hotkeys)
+        self.profile_colors.pop(name, None)
         self._save_current_profile()
         self.populate_model()
         self.refresh_status_ui()
@@ -1053,6 +1243,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profiles[new_name] = self.profiles.pop(current_name)
         if self.current_profile == current_name:
             self.current_profile = new_name
+        if current_name in self.profile_colors:
+            self.profile_colors[new_name] = self.profile_colors.pop(current_name)
+            self.config["profile_colors"] = dict(self.profile_colors)
+            storage.save_config(self.config)
         self._save_current_profile()
         self._sync_profile_ui()
         return True
@@ -1073,12 +1267,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if response != QtWidgets.QMessageBox.Yes:
             return False
         self.profiles.pop(profile_name, None)
+        self.profile_colors.pop(profile_name, None)
         if self.current_profile == profile_name:
             self.current_profile = next(iter(self.profiles))
             self.hotkeys = dict(self.profiles[self.current_profile])
             self.engine.update_hotkeys(self.hotkeys)
             self.populate_model()
             self.refresh_status_ui()
+        self.config["profile_colors"] = dict(self.profile_colors)
+        storage.save_config(self.config)
         self._save_current_profile()
         self._sync_profile_ui()
         return True
