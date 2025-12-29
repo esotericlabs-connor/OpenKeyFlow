@@ -17,6 +17,7 @@ from backend.trigger_engine import TriggerEngine
 APP_NAME = "OpenKeyFlow"
 ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
 SETTINGS_ICON_PATH = ASSETS_DIR / "settings_icon.ico"
+SETTINGS_ICON_PNG_PATH = ASSETS_DIR / "settings_icon.png"
 
 class LineNumberArea(QtWidgets.QWidget):
     def __init__(self, editor: "CodeEditor") -> None:
@@ -162,6 +163,8 @@ def make_status_icon(enabled: bool) -> QtGui.QIcon:
     return QtGui.QIcon(pixmap)
 
 def load_settings_icon() -> QtGui.QIcon:
+    if SETTINGS_ICON_PNG_PATH.exists():
+        return QtGui.QIcon(str(SETTINGS_ICON_PNG_PATH))
     if SETTINGS_ICON_PATH.exists():
         return QtGui.QIcon(str(SETTINGS_ICON_PATH))
     settings_icon = QtGui.QIcon.fromTheme("settings")
@@ -584,7 +587,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tray.show()
 
         if self.engine.hooks_available():
-            self.engine.add_hotkey("ctrl+f12", self.toggle_enabled)     
+            self.engine.add_hotkey("ctrl+f12", self.toggle_enabled)    
 
         self._was_hidden_to_tray = False
         self.settings_dialog: SettingsDialog | None = None
