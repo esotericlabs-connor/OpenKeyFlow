@@ -15,9 +15,7 @@ from backend.logging_utils import configure_logging, get_logger
 from backend.trigger_engine import TriggerEngine
 
 APP_NAME = "OpenKeyFlow"
-ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
-SETTINGS_ICON_PATH = ASSETS_DIR / "settings_icon.ico"
-SETTINGS_ICON_PNG_PATH = ASSETS_DIR / "settings_icon.png"
+
 
 class LineNumberArea(QtWidgets.QWidget):
     def __init__(self, editor: "CodeEditor") -> None:
@@ -161,16 +159,6 @@ def make_status_icon(enabled: bool) -> QtGui.QIcon:
     painter.drawEllipse(margin, margin, diameter, diameter)
     painter.end()
     return QtGui.QIcon(pixmap)
-
-def load_settings_icon() -> QtGui.QIcon:
-    if SETTINGS_ICON_PNG_PATH.exists():
-        return QtGui.QIcon(str(SETTINGS_ICON_PNG_PATH))
-    if SETTINGS_ICON_PATH.exists():
-        return QtGui.QIcon(str(SETTINGS_ICON_PATH))
-    settings_icon = QtGui.QIcon.fromTheme("settings")
-    if not settings_icon.isNull():
-        return settings_icon
-    return QtGui.QIcon()
 
 def make_gear_icon(palette: QtGui.QPalette, size: int = 18) -> QtGui.QIcon:
     pixmap = QtGui.QPixmap(size, size)
@@ -354,8 +342,12 @@ class SettingsDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout(self)
 
+        section_title_style = "QGroupBox { font-weight: 600; }"
+
         general_group = QtWidgets.QGroupBox("General")
+        general_group.setStyleSheet(section_title_style)
         general_layout = QtWidgets.QVBoxLayout(general_group)
+
         self.autostart_checkbox = QtWidgets.QCheckBox("Launch OpenKeyFlow on startup")
         self.autostart_checkbox.setChecked(is_autostart_enabled())
         self.autostart_checkbox.setEnabled(autostart_supported())
@@ -374,6 +366,7 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addWidget(general_group)
 
         data_group = QtWidgets.QGroupBox("Data & Import/Export")
+        data_group.setStyleSheet(section_title_style)
         data_layout = QtWidgets.QHBoxLayout(data_group)
         import_btn = QtWidgets.QPushButton("Import CSV")
         export_btn = QtWidgets.QPushButton("Export CSV")
@@ -384,6 +377,7 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addWidget(data_group)
 
         logging_group = QtWidgets.QGroupBox("Diagnostics")
+        logging_group.setStyleSheet(section_title_style)
         logging_layout = QtWidgets.QGridLayout(logging_group)
         self.logging_checkbox = QtWidgets.QCheckBox("Enable debug logging")
         self.logging_checkbox.setChecked(bool(self.window.config.get("logging_enabled", False)))
@@ -400,6 +394,7 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addWidget(logging_group)
 
         links_group = QtWidgets.QGroupBox("Links")
+        links_group.setStyleSheet(section_title_style)
         links_layout = QtWidgets.QHBoxLayout(links_group)
         donate_btn = QtWidgets.QPushButton("Donate")
         donate_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -553,13 +548,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toggle_btn.setStyleSheet("QToolButton { background: transparent; border: none; padding: 0; }")
         bottom_row.addWidget(self.toggle_btn)
 
-        self.settings_btn = QtWidgets.QToolButton()
-        settings_icon = load_settings_icon()
-        if settings_icon.isNull():
-            settings_icon = make_gear_icon(self.palette())
-        self.settings_btn.setIcon(settings_icon)
+        self.settings_btn = QtWidgets.QPushButton("Settings")
         self.settings_btn.setToolTip("Open settings")
-        self.settings_btn.setAutoRaise(True)
         self.settings_btn.clicked.connect(self.open_settings)
         bottom_row.addWidget(self.settings_btn)
 
@@ -632,10 +622,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dark_mode = enabled
         set_app_palette(self.dark_mode)
         self._apply_table_header_theme()
-        settings_icon = QtGui.QIcon.fromTheme("settings")
-        if settings_icon.isNull():
-            settings_icon = make_gear_icon(self.palette())
-        self.settings_btn.setIcon(settings_icon)
         self.config["dark_mode"] = self.dark_mode
         storage.save_config(self.config)
 
