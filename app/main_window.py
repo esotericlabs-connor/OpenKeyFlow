@@ -380,6 +380,7 @@ class SettingsDialog(QtWidgets.QDialog):
         profiles_layout = QtWidgets.QVBoxLayout(profiles_group)
         self.profile_list = QtWidgets.QListWidget()
         self.profile_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.profile_list.setMaximumHeight(160)
         profiles_layout.addWidget(self.profile_list)
 
         profile_buttons_row = QtWidgets.QHBoxLayout()
@@ -598,12 +599,28 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_table_header_theme()
 
         bottom_row = QtWidgets.QHBoxLayout()
-        self.profile_label = QtWidgets.QLabel("Profile:")
-        self.profile_combo = QtWidgets.QComboBox()
-        self.profile_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self.profile_combo.currentIndexChanged.connect(self._on_profile_combo_changed)
-        bottom_row.addWidget(self.profile_label)
-        bottom_row.addWidget(self.profile_combo)
+        self.profile_menu = QtWidgets.QMenu(self)
+        self.profile_menu.triggered.connect(self._on_profile_menu_triggered)
+        self.profile_button = QtWidgets.QPushButton()
+        self.profile_button.setMenu(self.profile_menu)
+        bottom_row.addWidget(self.profile_button)
+
+        self.profile_create_container = QtWidgets.QWidget()
+        profile_create_layout = QtWidgets.QHBoxLayout(self.profile_create_container)
+        profile_create_layout.setContentsMargins(0, 0, 0, 0)
+        self.profile_create_label = QtWidgets.QLabel("Enter new name:")
+        self.profile_create_edit = QtWidgets.QLineEdit()
+        self.profile_create_ok = QtWidgets.QPushButton("OK")
+        self.profile_create_cancel = QtWidgets.QPushButton("Cancel")
+        profile_create_layout.addWidget(self.profile_create_label)
+        profile_create_layout.addWidget(self.profile_create_edit)
+        profile_create_layout.addWidget(self.profile_create_ok)
+        profile_create_layout.addWidget(self.profile_create_cancel)
+        self.profile_create_container.setVisible(False)
+        self.profile_create_ok.clicked.connect(self._on_profile_create_confirmed)
+        self.profile_create_cancel.clicked.connect(self._hide_profile_create_inline)
+        self.profile_create_edit.returnPressed.connect(self._on_profile_create_confirmed)
+        bottom_row.addWidget(self.profile_create_container)
         bottom_row.addStretch(1)
 
         self.hotkey_count_label = QtWidgets.QLabel()
@@ -629,7 +646,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.search_edit.textChanged.connect(self.proxy.setQuery)
         self.tray: QtWidgets.QSystemTrayIcon | None = None
         self.refresh_status_ui()
-        self._refresh_profile_combo()
+        self._refresh_profile_menu()
 
         self.counter_timer = QtCore.QTimer(self)
         self.counter_timer.setInterval(300)
@@ -940,34 +957,50 @@ class MainWindow(QtWidgets.QMainWindow):
     def profile_names(self) -> list[str]:
         return list(self.profiles.keys())
 
+
     def _refresh_profile_combo(self) -> None:
-        self.profile_combo.blockSignals(True)
-        self.profile_combo.clear()
+        self._refresh_profile_menu()
+
+    def _refresh_profile_menu(self) -> None:
+        self.profile_menu.clear()
         for name in self.profile_names():
-            self.profile_combo.addItem(name, name)
-        self.profile_combo.addItem("Create new profile…", None)
-        try:
-            current_index = self.profile_names().index(self.current_profile)
-        except ValueError:
-            current_index = 0
-        self.profile_combo.setCurrentIndex(current_index)
-        self.profile_combo.blockSignals(False)
+            action = self.profile_menu.addAction(name)
+            action.setData(name)
+        self.profile_menu.addSeparator()
+        add_action = self.profile_menu.addAction("Add new profile…")
+        add_action.setData(None)
+        self.profile_button.setText(f"Profile: {self.current_profile}")
 
     def _sync_profile_ui(self) -> None:
-        self._refresh_profile_combo()
+        self._refresh_profile_menu()
         if self.settings_dialog:
             self.settings_dialog.refresh_profiles()
 
-    def _on_profile_combo_changed(self, index: int) -> None:
-        data = self.profile_combo.itemData(index)
+    def _on_profile_menu_triggered(self, action: QtGui.QAction) -> None:
+        data = action.data()
         if data is None:
-            created = self.prompt_create_profile()
-            if not created:
-                self._refresh_profile_combo()
+            self._show_profile_create_inline()
             return
         if data != self.current_profile:
             self.set_current_profile(data)
 
+    def _show_profile_create_inline(self) -> None:
+        self.profile_button.setEnabled(False)
+        self.profile_create_edit.clear()
+        self.profile_create_container.setVisible(True)
+        self.profile_create_edit.setFocus()
+
+    def _hide_profile_create_inline(self) -> None:
+        self.profile_create_container.setVisible(False)
+        self.profile_button.setEnabled(True)
+
+    def _on_profile_create_confirmed(self) -> None:
+        name = self.profile_create_edit.text()
+        if self.create_profile(name):
+            self._hide_profile_create_inline()
+        else:
+            self.profile_create_edit.setFocus()
+            
     def _save_current_profile(self) -> None:
         self.profiles[self.current_profile] = dict(self.hotkeys)
         storage.save_profiles(self.current_profile, self.profiles)
@@ -975,10 +1008,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _normalize_profile_name(self, name: str) -> str:
         return name.strip()
 
-    def prompt_create_profile(self) -> bool:
-        name, ok = QtWidgets.QInputDialog.getText(self, "Create Profile", "Profile name:")
-        if not ok:
-            return False
+    def create_profile(self, name: str) -> bool:      
         name = self._normalize_profile_name(name)
         if not name:
             QtWidgets.QMessageBox.warning(self, "Create Profile", "Profile name cannot be empty.")
@@ -995,6 +1025,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_status_ui()
         self._sync_profile_ui()
         return True
+    
+    def prompt_create_profile(self) -> bool:
+        name, ok = QtWidgets.QInputDialog.getText(self, "Create Profile", "Profile name:")
+        if not ok:
+            return False
+        return self.create_profile(name)
 
     def prompt_rename_profile(self, current_name: str) -> bool:
         new_name, ok = QtWidgets.QInputDialog.getText(
