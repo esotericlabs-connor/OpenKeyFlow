@@ -570,7 +570,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.counter_timer.setInterval(300)
         self.counter_timer.timeout.connect(self.refresh_counters_only)
         self.counter_timer.start()
-
         self.tray = QtWidgets.QSystemTrayIcon(self)
         self.tray.setIcon(make_status_icon(self.enabled))
         tray_menu = QtWidgets.QMenu()
