@@ -7,7 +7,6 @@ from typing import Dict
 
 import logging
 
-from PIL import Image, ImageDraw, ImageFont
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from backend import autostart
@@ -17,8 +16,94 @@ from backend.trigger_engine import TriggerEngine
 
 APP_NAME = "OpenKeyFlow"
 ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
-ACTIVE_ICON_PATH = ASSETS_DIR / "OpenKeyFlow_active.ico"
-IDLE_ICON_PATH = ASSETS_DIR / "OpenKeyFlow_idle.ico"
+ENABLED_ICON_PATH = ASSETS_DIR / "okf_enabled.ico"
+DISABLED_ICON_PATH = ASSETS_DIR / "okf_disabled.ico"
+
+class LineNumberArea(QtWidgets.QWidget):
+    def __init__(self, editor: "CodeEditor") -> None:
+        super().__init__(editor)
+        self.editor = editor
+
+    def sizeHint(self) -> QtCore.QSize:  # noqa: N802 - Qt override
+        return QtCore.QSize(self.editor.lineNumberAreaWidth(), 0)
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # noqa: N802 - Qt override
+        self.editor.lineNumberAreaPaintEvent(event)
+
+class CodeEditor(QtWidgets.QPlainTextEdit):
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._line_number_area = LineNumberArea(self)
+        self.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+        self.blockCountChanged.connect(self.update_line_number_area_width)
+        self.updateRequest.connect(self.update_line_number_area)
+        self.cursorPositionChanged.connect(self.highlight_current_line)
+        self.update_line_number_area_width(0)
+        self.highlight_current_line()
+
+    def lineNumberAreaWidth(self) -> int:  # noqa: N802 - Qt override
+        digits = len(str(max(1, self.blockCount())))
+        padding = 12 + self.fontMetrics().horizontalAdvance("9") * digits
+        return padding
+
+    def update_line_number_area_width(self, _: int) -> None:
+        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+
+    def update_line_number_area(self, rect: QtCore.QRect, dy: int) -> None:
+        if dy:
+            self._line_number_area.scroll(0, dy)
+        else:
+            self._line_number_area.update(0, rect.y(), self._line_number_area.width(), rect.height())
+        if rect.contains(self.viewport().rect()):
+            self.update_line_number_area_width(0)
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # noqa: N802 - Qt override
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self._line_number_area.setGeometry(
+            QtCore.QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height())
+        )
+
+    def lineNumberAreaPaintEvent(self, event: QtGui.QPaintEvent) -> None:  # noqa: N802 - Qt override
+        painter = QtGui.QPainter(self._line_number_area)
+        palette = self.palette()
+        background = palette.color(QtGui.QPalette.AlternateBase)
+        painter.fillRect(event.rect(), background)
+
+        block = self.firstVisibleBlock()
+        block_number = block.blockNumber()
+        top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
+        bottom = top + int(self.blockBoundingRect(block).height())
+
+        number_color = QtGui.QColor(palette.color(QtGui.QPalette.Text))
+        number_color.setAlpha(160)
+        painter.setPen(number_color)
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(block_number + 1)
+                painter.drawText(
+                    0,
+                    top,
+                    self._line_number_area.width() - 4,
+                    self.fontMetrics().height(),
+                    QtCore.Qt.AlignRight,
+                    number,
+                )
+            block = block.next()
+            top = bottom
+            bottom = top + int(self.blockBoundingRect(block).height())
+            block_number += 1
+
+    def highlight_current_line(self) -> None:
+        selection = QtWidgets.QTextEdit.ExtraSelection()
+        line_color = QtGui.QColor(self.palette().color(QtGui.QPalette.Highlight))
+        line_color.setAlpha(40)
+        selection.format.setBackground(line_color)
+        selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+        selection.cursor = self.textCursor()
+        selection.cursor.clearSelection()
+        self.setExtraSelections([selection])
 
 def autostart_supported() -> bool:
     _, error = autostart.status()
@@ -63,17 +148,23 @@ class HotkeyFilter(QtCore.QSortFilterProxyModel):
         return self.query in trigger or self.query in output
 
 def make_status_icon(enabled: bool) -> QtGui.QIcon:
-    color = QtGui.QColor("#2ecc71" if enabled else "#e74c3c")
+    icon_path = ENABLED_ICON_PATH if enabled else DISABLED_ICON_PATH
+    if icon_path.exists():
+        return QtGui.QIcon(str(icon_path))
+    fallback = QtGui.QPixmap(64, 64)
+    fallback.fill(QtGui.QColor("#2ecc71" if enabled else "#e74c3c"))
+    return QtGui.QIcon(fallback)
 
-    pixmap = QtGui.QPixmap(64, 64)
+def make_gear_icon(palette: QtGui.QPalette, size: int = 18) -> QtGui.QIcon:
+    pixmap = QtGui.QPixmap(size, size)
     pixmap.fill(QtCore.Qt.transparent)
-
     painter = QtGui.QPainter(pixmap)
     painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-
-    painter.setPen(QtCore.Qt.NoPen)
-    painter.setBrush(color)
-    painter.drawEllipse(8, 8, 48, 48)
+    font = QtGui.QFont()
+    font.setPointSize(int(size * 0.8))
+    painter.setFont(font)
+    painter.setPen(palette.color(QtGui.QPalette.Text))
+    painter.drawText(pixmap.rect(), QtCore.Qt.AlignCenter, "⚙")
     painter.end()
 
     return QtGui.QIcon(pixmap)
@@ -133,6 +224,21 @@ def set_app_palette(dark: bool) -> None:
                 color: #ff7b7b;
                 border: 1px solid #ff8080;
             }
+            QTabWidget::pane {
+                border: 1px solid #ff8080;
+            }
+            QTabBar::tab {
+                background: #1f2128;
+                color: #ffcccc;
+                border: 1px solid #ff8080;
+                border-bottom: none;
+                padding: 4px 10px;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background: #2c2f3b;
+                color: #ffffff;
+            }
             """
         )
     else:
@@ -161,6 +267,8 @@ class SpecialAddDialog(QtWidgets.QDialog):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Special Add")
+        if parent:
+            self.setWindowIcon(make_status_icon(getattr(parent, "enabled", True)))
         self.setModal(True)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -180,7 +288,7 @@ class SpecialAddDialog(QtWidgets.QDialog):
         self.output_edit.setPlaceholderText("Expansion output (supports multiple lines)")
         self.output_edit.setMinimumHeight(160)
 
-        self.code_edit = QtWidgets.QPlainTextEdit()
+        self.code_edit = CodeEditor()
         self.code_edit.setPlaceholderText("Code block (will be wrapped for you)")
         self.code_edit.setMinimumHeight(160)
         fixed_font = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
@@ -224,6 +332,7 @@ class SettingsDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.window = parent
         self.setWindowTitle("Settings")
+        self.setWindowIcon(make_status_icon(self.window.enabled))
         self.setModal(True)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -412,12 +521,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_table_header_theme()
 
         bottom_row = QtWidgets.QHBoxLayout()
-        bottom_row.addWidget(QtWidgets.QLabel("Status:"))
-        self.status_dot = QtWidgets.QLabel()
-        self.status_dot.setFixedSize(16, 16)
-        bottom_row.addWidget(self.status_dot)
-        self.state_label = QtWidgets.QLabel()
-        bottom_row.addWidget(self.state_label)
         bottom_row.addStretch(1)
 
         self.hotkey_count_label = QtWidgets.QLabel()
@@ -434,7 +537,10 @@ class MainWindow(QtWidgets.QMainWindow):
         bottom_row.addWidget(self.toggle_btn)
 
         self.settings_btn = QtWidgets.QToolButton()
-        self.settings_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_FileDialogDetailedView))
+        settings_icon = QtGui.QIcon.fromTheme("settings")
+        if settings_icon.isNull():
+            settings_icon = make_gear_icon(self.palette())
+        self.settings_btn.setIcon(settings_icon)        
         self.settings_btn.setToolTip("Open settings")
         self.settings_btn.setAutoRaise(True)
         self.settings_btn.clicked.connect(self.open_settings)
@@ -486,15 +592,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def refresh_status_ui(self) -> None:
         self.refresh_counters_only()
-        pixmap = QtGui.QPixmap(16, 16)
-        pixmap.fill(QtGui.QColor("#2ecc71" if self.enabled else "#e74c3c"))
-        self.status_dot.setPixmap(pixmap)
-        self.state_label.setText("Enabled" if self.enabled else "Disabled")
+        status_icon = make_status_icon(self.enabled)
         self.toggle_btn.setChecked(self.enabled)
-        self.toggle_btn.setIcon(make_status_icon(self.enabled))
+        self.toggle_btn.setIcon(status_icon)
         self.toggle_btn.setToolTip("Click to disable hotkeys" if self.enabled else "Click to enable hotkeys")
+        self.setWindowIcon(status_icon)
+        app = QtWidgets.QApplication.instance()
+        if app:
+            app.setWindowIcon(status_icon)
         if self.tray is not None:
-            self.tray.setIcon(make_status_icon(self.enabled))
+            self.tray.setIcon(status_icon)
 
     def _apply_table_header_theme(self) -> None:
         header = self.table.horizontalHeader()
@@ -509,6 +616,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dark_mode = enabled
         set_app_palette(self.dark_mode)
         self._apply_table_header_theme()
+        settings_icon = QtGui.QIcon.fromTheme("settings")
+        if settings_icon.isNull():
+            settings_icon = make_gear_icon(self.palette())
+        self.settings_btn.setIcon(settings_icon)
         self.config["dark_mode"] = self.dark_mode
         storage.save_config(self.config)
 
