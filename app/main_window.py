@@ -376,6 +376,30 @@ class SettingsDialog(QtWidgets.QDialog):
         data_layout.addWidget(export_btn)
         layout.addWidget(data_group)
 
+        profiles_group = QtWidgets.QGroupBox("Profiles")
+        profiles_layout = QtWidgets.QVBoxLayout(profiles_group)
+        self.profile_list = QtWidgets.QListWidget()
+        self.profile_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        profiles_layout.addWidget(self.profile_list)
+
+        profile_buttons_row = QtWidgets.QHBoxLayout()
+        new_profile_btn = QtWidgets.QPushButton("New")
+        rename_profile_btn = QtWidgets.QPushButton("Rename")
+        delete_profile_btn = QtWidgets.QPushButton("Delete")
+        set_active_btn = QtWidgets.QPushButton("Set Active")
+
+        new_profile_btn.clicked.connect(self._on_new_profile)
+        rename_profile_btn.clicked.connect(self._on_rename_profile)
+        delete_profile_btn.clicked.connect(self._on_delete_profile)
+        set_active_btn.clicked.connect(self._on_set_active_profile)
+
+        profile_buttons_row.addWidget(new_profile_btn)
+        profile_buttons_row.addWidget(rename_profile_btn)
+        profile_buttons_row.addWidget(delete_profile_btn)
+        profile_buttons_row.addWidget(set_active_btn)
+        profiles_layout.addLayout(profile_buttons_row)
+        layout.addWidget(profiles_group)
+
         logging_group = QtWidgets.QGroupBox("Diagnostics")
         logging_group.setStyleSheet(section_title_style)
         logging_layout = QtWidgets.QGridLayout(logging_group)
@@ -427,6 +451,7 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addWidget(buttons)
 
         self._update_logging_controls()
+        self.refresh_profiles()
 
     def _update_logging_controls(self) -> None:
         enabled = self.logging_checkbox.isChecked()
@@ -455,6 +480,45 @@ class SettingsDialog(QtWidgets.QDialog):
         self.window.set_logging_path(Path(path))
         self._update_logging_controls()
 
+    def refresh_profiles(self) -> None:
+        self.profile_list.clear()
+        current = self.window.current_profile
+        for name in self.window.profile_names():
+            display = f"{name} (current)" if name == current else name
+            item = QtWidgets.QListWidgetItem(display)
+            item.setData(QtCore.Qt.UserRole, name)
+            self.profile_list.addItem(item)
+
+    def _selected_profile_name(self) -> str | None:
+        item = self.profile_list.currentItem()
+        if not item:
+            return None
+        return item.data(QtCore.Qt.UserRole)
+
+    def _on_new_profile(self) -> None:
+        if self.window.prompt_create_profile():
+            self.refresh_profiles()
+
+    def _on_rename_profile(self) -> None:
+        profile_name = self._selected_profile_name()
+        if not profile_name:
+            return
+        if self.window.prompt_rename_profile(profile_name):
+            self.refresh_profiles()
+
+    def _on_delete_profile(self) -> None:
+        profile_name = self._selected_profile_name()
+        if not profile_name:
+            return
+        if self.window.delete_profile(profile_name):
+            self.refresh_profiles()
+
+    def _on_set_active_profile(self) -> None:
+        profile_name = self._selected_profile_name()
+        if not profile_name:
+            return
+        if self.window.set_current_profile(profile_name):
+            self.refresh_profiles()
 
 class MainWindow(QtWidgets.QMainWindow):
     updateCounters = QtCore.pyqtSignal()
@@ -462,7 +526,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, engine: TriggerEngine, logger: Logger | None = None) -> None:
         super().__init__()
         self.engine = engine
-        self.hotkeys: Dict[str, str] = storage.load_hotkeys()
+        self.current_profile, self.profiles = storage.load_profiles()
+        self.hotkeys: Dict[str, str] = dict(self.profiles.get(self.current_profile, {}))        
         self.config = storage.load_config()
         self.dark_mode = bool(self.config.get("dark_mode", False))
         self.enabled = True
@@ -533,6 +598,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_table_header_theme()
 
         bottom_row = QtWidgets.QHBoxLayout()
+        self.profile_label = QtWidgets.QLabel("Profile:")
+        self.profile_combo = QtWidgets.QComboBox()
+        self.profile_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        self.profile_combo.currentIndexChanged.connect(self._on_profile_combo_changed)
+        bottom_row.addWidget(self.profile_label)
+        bottom_row.addWidget(self.profile_combo)
         bottom_row.addStretch(1)
 
         self.hotkey_count_label = QtWidgets.QLabel()
@@ -558,6 +629,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.search_edit.textChanged.connect(self.proxy.setQuery)
         self.tray: QtWidgets.QSystemTrayIcon | None = None
         self.refresh_status_ui()
+        self._refresh_profile_combo()
 
         self.counter_timer = QtCore.QTimer(self)
         self.counter_timer.setInterval(300)
@@ -662,7 +734,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def open_settings(self) -> None:
         dialog = SettingsDialog(self)
+        self.settings_dialog = dialog
+        dialog.finished.connect(self._on_settings_closed)
         dialog.exec_()
+
+    def _on_settings_closed(self) -> None:
+        self.settings_dialog = None
 
     def _maybe_show_use_policy_prompt(self) -> None:
         if self.config.get("accepted_use_policy"):
@@ -803,7 +880,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 return False
             self.hotkeys[normalized_trigger] = output
 
-        storage.save_hotkeys(self.hotkeys)
+        self._save_current_profile()
         self.engine.update_hotkeys(self.hotkeys)
         self.populate_model()
         self.refresh_status_ui()
@@ -823,7 +900,7 @@ class MainWindow(QtWidgets.QMainWindow):
         with self.hotkey_lock:
             for trigger in to_delete:
                 self.hotkeys.pop(trigger, None)
-        storage.save_hotkeys(self.hotkeys)
+        self._save_current_profile()
         self.engine.update_hotkeys(self.hotkeys)
         self.populate_model()
         self.refresh_status_ui()
@@ -837,7 +914,7 @@ class MainWindow(QtWidgets.QMainWindow):
             for trigger, output in storage.import_hotkeys_from_csv(Path(path)):
                 self.hotkeys[trigger] = output
                 added += 1
-        storage.save_hotkeys(self.hotkeys)
+        self._save_current_profile()
         self.engine.update_hotkeys(self.hotkeys)
         self.populate_model()
         self.refresh_status_ui()
@@ -855,5 +932,131 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_status_ui()
 
     def toggle_theme(self) -> None:
-        
         self.set_dark_mode(not self.dark_mode)
+
+    # ------------------------------------------------------------------
+    # Profiles
+    # ------------------------------------------------------------------
+    def profile_names(self) -> list[str]:
+        return list(self.profiles.keys())
+
+    def _refresh_profile_combo(self) -> None:
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        for name in self.profile_names():
+            self.profile_combo.addItem(name, name)
+        self.profile_combo.addItem("Create new profile…", None)
+        try:
+            current_index = self.profile_names().index(self.current_profile)
+        except ValueError:
+            current_index = 0
+        self.profile_combo.setCurrentIndex(current_index)
+        self.profile_combo.blockSignals(False)
+
+    def _sync_profile_ui(self) -> None:
+        self._refresh_profile_combo()
+        if self.settings_dialog:
+            self.settings_dialog.refresh_profiles()
+
+    def _on_profile_combo_changed(self, index: int) -> None:
+        data = self.profile_combo.itemData(index)
+        if data is None:
+            created = self.prompt_create_profile()
+            if not created:
+                self._refresh_profile_combo()
+            return
+        if data != self.current_profile:
+            self.set_current_profile(data)
+
+    def _save_current_profile(self) -> None:
+        self.profiles[self.current_profile] = dict(self.hotkeys)
+        storage.save_profiles(self.current_profile, self.profiles)
+
+    def _normalize_profile_name(self, name: str) -> str:
+        return name.strip()
+
+    def prompt_create_profile(self) -> bool:
+        name, ok = QtWidgets.QInputDialog.getText(self, "Create Profile", "Profile name:")
+        if not ok:
+            return False
+        name = self._normalize_profile_name(name)
+        if not name:
+            QtWidgets.QMessageBox.warning(self, "Create Profile", "Profile name cannot be empty.")
+            return False
+        if name in self.profiles:
+            QtWidgets.QMessageBox.warning(self, "Create Profile", "That profile already exists.")
+            return False
+        self.profiles[name] = {}
+        self.current_profile = name
+        self.hotkeys = {}
+        self.engine.update_hotkeys(self.hotkeys)
+        self._save_current_profile()
+        self.populate_model()
+        self.refresh_status_ui()
+        self._sync_profile_ui()
+        return True
+
+    def prompt_rename_profile(self, current_name: str) -> bool:
+        new_name, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Rename Profile",
+            "New profile name:",
+            text=current_name,
+        )
+        if not ok:
+            return False
+        new_name = self._normalize_profile_name(new_name)
+        if not new_name:
+            QtWidgets.QMessageBox.warning(self, "Rename Profile", "Profile name cannot be empty.")
+            return False
+        if new_name in self.profiles and new_name != current_name:
+            QtWidgets.QMessageBox.warning(self, "Rename Profile", "That profile already exists.")
+            return False
+        if new_name == current_name:
+            return False
+        self.profiles[new_name] = self.profiles.pop(current_name)
+        if self.current_profile == current_name:
+            self.current_profile = new_name
+        self._save_current_profile()
+        self._sync_profile_ui()
+        return True
+
+    def delete_profile(self, profile_name: str) -> bool:
+        if profile_name not in self.profiles:
+            return False
+        if len(self.profiles) <= 1:
+            QtWidgets.QMessageBox.warning(self, "Delete Profile", "You must keep at least one profile.")
+            return False
+        response = QtWidgets.QMessageBox.question(
+            self,
+            "Delete Profile",
+            f"Delete profile '{profile_name}'? This cannot be undone.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if response != QtWidgets.QMessageBox.Yes:
+            return False
+        self.profiles.pop(profile_name, None)
+        if self.current_profile == profile_name:
+            self.current_profile = next(iter(self.profiles))
+            self.hotkeys = dict(self.profiles[self.current_profile])
+            self.engine.update_hotkeys(self.hotkeys)
+            self.populate_model()
+            self.refresh_status_ui()
+        self._save_current_profile()
+        self._sync_profile_ui()
+        return True
+
+    def set_current_profile(self, profile_name: str) -> bool:
+        if profile_name not in self.profiles:
+            return False
+        if profile_name == self.current_profile:
+            return True
+        self._save_current_profile()
+        self.current_profile = profile_name
+        self.hotkeys = dict(self.profiles.get(profile_name, {}))
+        self.engine.update_hotkeys(self.hotkeys)
+        self.populate_model()
+        self.refresh_status_ui()
+        self._sync_profile_ui()
+        return True

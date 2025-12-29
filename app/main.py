@@ -13,8 +13,9 @@ from .main_window import APP_NAME, MainWindow
 def main() -> None:
     storage.ensure_data_dir()
     config = storage.load_config()
-    hotkeys = storage.load_hotkeys()
-
+    current_profile, profiles = storage.load_profiles()
+    hotkeys = profiles.get(current_profile, {})
+    
     engine = TriggerEngine(
         hotkeys=hotkeys,
         cooldown=float(config.get("cooldown", 0.3)),

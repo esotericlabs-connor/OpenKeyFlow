@@ -19,6 +19,7 @@ BASE_DATA_DIR = Path(user_data_dir(APP_NAME, APP_AUTHOR))
 CONFIG_DIR = Path(user_config_dir(APP_NAME, APP_AUTHOR))
 DATA_DIR = BASE_DATA_DIR
 HOTKEYS_FILE = DATA_DIR / "hotkeys.json"
+PROFILES_FILE = DATA_DIR / "profiles.json"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 CSV_TEMPLATE = DATA_DIR / "export_sample.csv"
 DEFAULT_LOG_FILE = DATA_DIR / "openkeyflow.log"
@@ -32,12 +33,31 @@ DEFAULT_CONFIG = {
     "log_file": str(DEFAULT_LOG_FILE),
 }
 
+DEFAULT_PROFILE_NAME = "main"
+
+def _default_profiles() -> Dict[str, object]:
+    return {
+        "current_profile": DEFAULT_PROFILE_NAME,
+        "profiles": {
+            DEFAULT_PROFILE_NAME: {},
+        },
+    }
+
 def ensure_data_dir() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     _migrate_legacy_data()
     if not HOTKEYS_FILE.exists():
         HOTKEYS_FILE.write_text("{}", encoding="utf-8")
+    if not PROFILES_FILE.exists():
+        profiles = _default_profiles()
+        try:
+            hotkeys = _load_hotkeys_file()
+        except Exception:
+            hotkeys = {}
+        if hotkeys:
+            profiles["profiles"][DEFAULT_PROFILE_NAME] = hotkeys
+        PROFILES_FILE.write_text(json.dumps(profiles, indent=2), encoding="utf-8")
     if not CONFIG_FILE.exists():
         CONFIG_FILE.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
     if not CSV_TEMPLATE.exists():
@@ -73,7 +93,15 @@ def _migrate_legacy_data() -> None:
             pass
 
 def load_hotkeys() -> Dict[str, str]:
-    ensure_data_dir()
+    current_profile, profiles = load_profiles()
+    return dict(profiles.get(current_profile, {}))
+
+def save_hotkeys(hotkeys: Dict[str, str]) -> None:
+    current_profile, profiles = load_profiles()
+    profiles[current_profile] = dict(hotkeys)
+    save_profiles(current_profile, profiles)
+
+def _load_hotkeys_file() -> Dict[str, str]:
     with HOTKEYS_FILE.open("r", encoding="utf-8") as f:
         try:
             data = json.load(f)
@@ -84,6 +112,40 @@ def load_hotkeys() -> Dict[str, str]:
     if not data:
         HOTKEYS_FILE.write_text("{}", encoding="utf-8")
     return {str(k): str(v) for k, v in data.items()}
+
+def load_profiles() -> Tuple[str, Dict[str, Dict[str, str]]]:
+    ensure_data_dir()
+    if not PROFILES_FILE.exists():
+        default_profiles = _default_profiles()
+        PROFILES_FILE.write_text(json.dumps(default_profiles, indent=2), encoding="utf-8")
+    with PROFILES_FILE.open("r", encoding="utf-8") as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            data = {}
+    profiles_raw = data.get("profiles") if isinstance(data, dict) else {}
+    if not isinstance(profiles_raw, dict):
+        profiles_raw = {}
+    profiles: Dict[str, Dict[str, str]] = {}
+    for name, value in profiles_raw.items():
+        if isinstance(name, str) and isinstance(value, dict):
+            profiles[name] = {str(k): str(v) for k, v in value.items()}
+    if DEFAULT_PROFILE_NAME not in profiles:
+        profiles[DEFAULT_PROFILE_NAME] = {}
+    current_profile = data.get("current_profile") if isinstance(data, dict) else None
+    if not isinstance(current_profile, str) or current_profile not in profiles:
+        current_profile = DEFAULT_PROFILE_NAME
+    save_profiles(current_profile, profiles)
+    return current_profile, profiles
+
+def save_profiles(current_profile: str, profiles: Dict[str, Dict[str, str]]) -> None:
+    ensure_data_dir()
+    payload = {
+        "current_profile": current_profile,
+        "profiles": profiles,
+    }
+    with PROFILES_FILE.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
 
 def save_hotkeys(hotkeys: Dict[str, str]) -> None:
     ensure_data_dir()
