@@ -16,8 +16,7 @@ from backend.trigger_engine import TriggerEngine
 
 APP_NAME = "OpenKeyFlow"
 ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
-ENABLED_ICON_PATH = ASSETS_DIR / "okf_enabled.ico"
-DISABLED_ICON_PATH = ASSETS_DIR / "okf_disabled.ico"
+SETTINGS_ICON_PATH = ASSETS_DIR / "settings_icon.ico"
 
 class LineNumberArea(QtWidgets.QWidget):
     def __init__(self, editor: "CodeEditor") -> None:
@@ -148,12 +147,27 @@ class HotkeyFilter(QtCore.QSortFilterProxyModel):
         return self.query in trigger or self.query in output
 
 def make_status_icon(enabled: bool) -> QtGui.QIcon:
-    icon_path = ENABLED_ICON_PATH if enabled else DISABLED_ICON_PATH
-    if icon_path.exists():
-        return QtGui.QIcon(str(icon_path))
-    fallback = QtGui.QPixmap(64, 64)
-    fallback.fill(QtGui.QColor("#2ecc71" if enabled else "#e74c3c"))
-    return QtGui.QIcon(fallback)
+    icon_size = 64
+    pixmap = QtGui.QPixmap(icon_size, icon_size)
+    pixmap.fill(QtCore.Qt.transparent)
+    painter = QtGui.QPainter(pixmap)
+    painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+    color = QtGui.QColor("#2ecc71" if enabled else "#e74c3c")
+    painter.setBrush(color)
+    painter.setPen(QtCore.Qt.NoPen)
+    margin = 8
+    diameter = icon_size - (margin * 2)
+    painter.drawEllipse(margin, margin, diameter, diameter)
+    painter.end()
+    return QtGui.QIcon(pixmap)
+
+def load_settings_icon() -> QtGui.QIcon:
+    if SETTINGS_ICON_PATH.exists():
+        return QtGui.QIcon(str(SETTINGS_ICON_PATH))
+    settings_icon = QtGui.QIcon.fromTheme("settings")
+    if not settings_icon.isNull():
+        return settings_icon
+    return QtGui.QIcon()
 
 def make_gear_icon(palette: QtGui.QPalette, size: int = 18) -> QtGui.QIcon:
     pixmap = QtGui.QPixmap(size, size)
@@ -537,10 +551,10 @@ class MainWindow(QtWidgets.QMainWindow):
         bottom_row.addWidget(self.toggle_btn)
 
         self.settings_btn = QtWidgets.QToolButton()
-        settings_icon = QtGui.QIcon.fromTheme("settings")
+        settings_icon = load_settings_icon()
         if settings_icon.isNull():
             settings_icon = make_gear_icon(self.palette())
-        self.settings_btn.setIcon(settings_icon)        
+        self.settings_btn.setIcon(settings_icon)
         self.settings_btn.setToolTip("Open settings")
         self.settings_btn.setAutoRaise(True)
         self.settings_btn.clicked.connect(self.open_settings)
