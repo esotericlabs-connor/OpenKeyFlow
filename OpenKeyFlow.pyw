@@ -1,7 +1,6 @@
 """Windows-friendly launcher for OpenKeyFlow."""
 
-from app.main import main
-
+from openkeyflow.launcher import main
 
 if __name__ == "__main__":
     main()

@@ -56,10 +56,7 @@ D285C00096AC355C4C81D357D5CB578BE7F044C562270241B326C0D144427AA0
 
    ```bash
    # Console
-   python openkeyflow.py
-
-   # Module form (works same way)
-   python -m app
+   python -m openkeyflow
    ```
    ### Linux (Global Hotkeys)
 

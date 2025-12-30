@@ -1,4 +1,4 @@
-"""Bootstrap launcher for OpenKeyFlow."""
+"""OpenKeyFlow startup helpers."""
 from __future__ import annotations
 
 import importlib.util
@@ -42,6 +42,16 @@ def _format_list(items: Iterable[str]) -> str:
 def _warn(message: str) -> None:
     sys.stderr.write(f"{message}\n")
 
+def _requirements_file() -> str:
+    backend_name = hooks.selected_backend_name()
+    if backend_name == "keyboard":
+        return "requirements-windows.txt"
+    if backend_name == "pynput":
+        if platform.system() == "Darwin":
+            return "requirements-macos.txt"
+        return "requirements-linux.txt"
+    return "requirements.txt"
+
 def _check_dependencies() -> None:
     required = list(BASE_REQUIRED_IMPORTS) + hooks.required_packages()
     missing = [name for name in required if importlib.util.find_spec(name) is None]
@@ -50,7 +60,7 @@ def _check_dependencies() -> None:
         _warn("Required packages missing:")
         _warn(f"  {joined}")
         _warn("Install them for this interpreter with:")
-        _warn(f"  {sys.executable} -m pip install -r requirements.txt")
+        _warn(f"  {sys.executable} -m pip install -r {_requirements_file()}")
         raise SystemExit(1)
 
 def _check_root_warning() -> None:
@@ -104,8 +114,9 @@ def _check_macos_preflight() -> None:
     _check_root_warning()
 
     if not _in_virtualenv():
-        _warn("Note: We recommend using an venv to isolate dependencies if running OKF from source.")
-
+        _warn(
+            "Note: We recommend using an venv to isolate dependencies if running OKF from source."
+        )
 def main() -> None:
     _check_linux_preflight()
     _check_macos_preflight()
@@ -115,6 +126,4 @@ def main() -> None:
 
     _warn(f"Launching OpenKeyFlow on {platform.system()}...")
     app_main()
-
-if __name__ == "__main__":
-    main()
+__all__ = ["main"]
