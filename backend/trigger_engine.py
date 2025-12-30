@@ -55,14 +55,17 @@ def safe_write(
     backend: hooks.BaseHookBackend,
     *,
     paste_delay: float = 0.05,
+    use_clipboard: bool = True,
+    use_clipboard: bool = True,
     logger: Logger | None = None,
 ) -> None:
     
     """Safely send text to the active window."""
     log = logger or getLogger("openkeyflow")
     normalized = text.replace("\r\n", "\n")
-    if pyperclip is None or platform.system() == "Linux":
+    if not use_clipboard or pyperclip is None or platform.system() == "Linux":
         backend.write(normalized, interval=DIRECT_WRITE_INTERVAL)
+        return
     try:
         previous = pyperclip.paste()
     except Exception as exc:
@@ -105,6 +108,7 @@ class TriggerEngine:
         self._enabled = True
         self._cooldown = cooldown
         self._paste_delay = paste_delay
+        self._use_clipboard = use_clipboard
         self._fire_callback = fire_callback
         self._backend: hooks.BaseHookBackend | None = None
         self._backend_error: str | None = None
@@ -165,6 +169,10 @@ class TriggerEngine:
     def set_paste_delay(self, paste_delay: float) -> None:
         with self._lock:
             self._paste_delay = max(0.0, paste_delay)
+    
+    def set_use_clipboard(self, use_clipboard: bool) -> None:
+        with self._lock:
+            self._use_clipboard = bool(use_clipboard)
 
     def set_logger(self, logger: Logger) -> None:
         with self._lock:
@@ -280,7 +288,13 @@ class TriggerEngine:
                 time.sleep(self._paste_delay)
             if self._backend is None:
                 return None
-            safe_write(output, self._backend, paste_delay=self._paste_delay, logger=self._logger)      
+            safe_write(
+                output,
+                self._backend,
+                paste_delay=self._paste_delay,
+                use_clipboard=self._use_clipboard,
+                logger=self._logger,
+            )
             self._buffer = ""
             self._fired_count += 1
             return trigger, output

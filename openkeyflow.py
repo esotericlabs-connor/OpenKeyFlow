@@ -36,8 +36,6 @@ def main() -> None:
     from app.main import main as app_main
 
     app_main()
-from app.main import main
-
 
 if __name__ == "__main__":
     main()

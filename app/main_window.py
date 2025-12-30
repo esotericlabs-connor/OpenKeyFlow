@@ -388,6 +388,31 @@ class SettingsDialog(QtWidgets.QDialog):
         data_layout.addWidget(export_btn)
         layout.addWidget(data_group)
 
+        privacy_group = QtWidgets.QGroupBox("Privacy & Security")
+        privacy_layout = QtWidgets.QVBoxLayout(privacy_group)
+
+        self.encryption_checkbox = QtWidgets.QCheckBox("Encrypt profiles with a passphrase")
+        self.encryption_checkbox.setChecked(bool(self.window.config.get("profiles_encrypted", False)))
+        self.encryption_checkbox.toggled.connect(self._on_encryption_toggled)
+        privacy_layout.addWidget(self.encryption_checkbox)
+
+        encryption_hint = QtWidgets.QLabel(
+            "You will be prompted for the passphrase on startup to access your profiles."
+        )
+        encryption_hint.setWordWrap(True)
+        privacy_layout.addWidget(encryption_hint)
+
+        self.change_passphrase_btn = QtWidgets.QPushButton("Change passphrase")
+        self.change_passphrase_btn.clicked.connect(self._on_change_passphrase)
+        privacy_layout.addWidget(self.change_passphrase_btn)
+
+        self.clipboard_checkbox = QtWidgets.QCheckBox("Use clipboard for paste (faster, may expose clipboard history)")
+        self.clipboard_checkbox.setChecked(bool(self.window.config.get("use_clipboard", True)))
+        self.clipboard_checkbox.toggled.connect(self._on_clipboard_toggled)
+        privacy_layout.addWidget(self.clipboard_checkbox)
+
+        layout.addWidget(privacy_group)
+
         profiles_group = QtWidgets.QGroupBox("Profiles")
         profiles_layout = QtWidgets.QVBoxLayout(profiles_group)
         self.profile_list = QtWidgets.QListWidget()
@@ -480,10 +505,12 @@ class SettingsDialog(QtWidgets.QDialog):
             close_button.setText("Close")
         layout.addWidget(buttons)
 
-        self._update_logging_controls()
+        self._update_logging_controls()        
+        self._update_encryption_controls()
         self.section_groups = [
             general_group,
             data_group,
+            privacy_group,
             profiles_group,
             logging_group,
             links_group,
@@ -497,6 +524,11 @@ class SettingsDialog(QtWidgets.QDialog):
         enabled = self.logging_checkbox.isChecked()
         self.log_path_edit.setEnabled(enabled)
         self.browse_btn.setEnabled(enabled)
+
+    def _update_encryption_controls(self) -> None:
+        encrypted = self.encryption_checkbox.isChecked()
+        self.change_passphrase_btn.setEnabled(encrypted)
+
 
     def _apply_section_title_style(self) -> None:
         if self.window.dark_mode:
@@ -522,6 +554,20 @@ class SettingsDialog(QtWidgets.QDialog):
     def _on_logging_toggled(self, checked: bool) -> None:
         self.window.set_logging_enabled(checked, Path(self.log_path_edit.text()))
         self._update_logging_controls()
+
+    def _on_encryption_toggled(self, checked: bool) -> None:
+        success = self.window.set_profiles_encrypted(checked)
+        if not success:
+            self.encryption_checkbox.blockSignals(True)
+            self.encryption_checkbox.setChecked(not checked)
+            self.encryption_checkbox.blockSignals(False)
+        self._update_encryption_controls()
+
+    def _on_change_passphrase(self) -> None:
+        self.window.change_profiles_passphrase()
+
+    def _on_clipboard_toggled(self, checked: bool) -> None:
+        self.window.set_use_clipboard(checked)
 
     def _on_choose_log_path(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Select log file", self.log_path_edit.text(), "Log files (*.log)")
@@ -648,12 +694,22 @@ class SettingsDialog(QtWidgets.QDialog):
 class MainWindow(QtWidgets.QMainWindow):
     updateCounters = QtCore.pyqtSignal()
 
-    def __init__(self, engine: TriggerEngine, logger: Logger | None = None) -> None:
+
+    def __init__(
+        self,
+        engine: TriggerEngine,
+        logger: Logger | None = None,
+        *,
+        profile_passphrase: str | None = None,
+        profiles_encrypted: bool = False,
+    ) -> None:
         super().__init__()
         self.engine = engine
+        self.current_profile, self.profiles = storage.load_profiles(passphrase=profile_passphrase)
         self.current_profile, self.profiles = storage.load_profiles()
         self.hotkeys: Dict[str, str] = dict(self.profiles.get(self.current_profile, {}))        
         self.config = storage.load_config()
+        self.config["profiles_encrypted"] = profiles_encrypted
         self.profile_colors: Dict[str, str] = self._normalize_profile_colors(
             self.config.get("profile_colors", {})
         )
@@ -661,6 +717,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.enabled = True
         self.hotkey_lock = threading.RLock()
         self.logger: Logger = logger or get_logger()
+        self.profile_passphrase = profile_passphrase
+        self.profiles_encrypted = profiles_encrypted
 
         self._allow_close = False
 
@@ -668,6 +726,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.engine.set_paste_delay(float(self.config.get("paste_delay", 0.05)))
         self.engine.update_hotkeys(self.hotkeys)
         self.engine.set_logger(self.logger)
+        self.engine.set_use_clipboard(bool(self.config.get("use_clipboard", True)))
 
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(760, 480)
@@ -875,6 +934,133 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Logging",
                 f"Failed to set log path to {path}:\n{exc}",
             )
+
+    def set_profiles_encrypted(self, enabled: bool) -> bool:
+        if enabled:
+            passphrase = self._prompt_passphrase(
+                "Encrypt Profiles",
+                "Create a passphrase:",
+                confirm=True,
+            )
+            if not passphrase:
+                return False
+            try:
+                storage.save_profiles(self.current_profile, self.profiles, passphrase=passphrase)
+            except Exception as exc:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Encrypt Profiles",
+                    f"Failed to encrypt profiles:\n{exc}",
+                )
+                return False
+            self.profiles_encrypted = True
+            self.profile_passphrase = passphrase
+            self.config["profiles_encrypted"] = True
+            storage.save_config(self.config)
+            return True
+
+        if not self.profiles_encrypted:
+            return True
+
+        passphrase = self.profile_passphrase or self._prompt_passphrase(
+            "Decrypt Profiles",
+            "Enter your current passphrase:",
+        )
+        if not passphrase:
+            return False
+        try:
+            storage.load_profiles(passphrase=passphrase)
+        except storage.ProfilesEncryptionError as exc:
+            QtWidgets.QMessageBox.warning(self, "Decrypt Profiles", str(exc))
+            return False
+        try:
+            storage.save_profiles(self.current_profile, self.profiles)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Decrypt Profiles",
+                f"Failed to save decrypted profiles:\n{exc}",
+            )
+            return False
+        self.profiles_encrypted = False
+        self.profile_passphrase = None
+        self.config["profiles_encrypted"] = False
+        storage.save_config(self.config)
+        return True
+
+    def change_profiles_passphrase(self) -> None:
+        if not self.profiles_encrypted:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Change Passphrase",
+                "Profiles are not encrypted.",
+            )
+            return
+        current_passphrase = self.profile_passphrase or self._prompt_passphrase(
+            "Change Passphrase",
+            "Enter your current passphrase:",
+        )
+        if not current_passphrase:
+            return
+        try:
+            storage.load_profiles(passphrase=current_passphrase)
+        except storage.ProfilesEncryptionError as exc:
+            QtWidgets.QMessageBox.warning(self, "Change Passphrase", str(exc))
+            return
+        new_passphrase = self._prompt_passphrase(
+            "Change Passphrase",
+            "Enter a new passphrase:",
+            confirm=True,
+        )
+        if not new_passphrase:
+            return
+        try:
+            storage.save_profiles(self.current_profile, self.profiles, passphrase=new_passphrase)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Change Passphrase",
+                f"Failed to update passphrase:\n{exc}",
+            )
+            return
+        self.profile_passphrase = new_passphrase
+        self.config["profiles_encrypted"] = True
+        storage.save_config(self.config)
+
+    def set_use_clipboard(self, enabled: bool) -> None:
+        self.config["use_clipboard"] = bool(enabled)
+        storage.save_config(self.config)
+        self.engine.set_use_clipboard(bool(enabled))
+
+    def _prompt_passphrase(self, title: str, prompt: str, *, confirm: bool = False) -> str | None:
+        passphrase, ok = QtWidgets.QInputDialog.getText(
+            self,
+            title,
+            prompt,
+            QtWidgets.QLineEdit.Password,
+        )
+        if not ok:
+            return None
+        passphrase = passphrase.strip()
+        if not passphrase:
+            return None
+        if confirm:
+            confirm_value, ok = QtWidgets.QInputDialog.getText(
+                self,
+                title,
+                "Confirm passphrase:",
+                QtWidgets.QLineEdit.Password,
+            )
+            if not ok:
+                return None
+            if confirm_value != passphrase:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    title,
+                    "Passphrases do not match.",
+                )
+                return None
+        return passphrase
 
     def update_autostart(self, enabled: bool) -> bool:
         return set_autostart_enabled(self, enabled)
@@ -1154,8 +1340,9 @@ class MainWindow(QtWidgets.QMainWindow):
             
     def _save_current_profile(self) -> None:
         self.profiles[self.current_profile] = dict(self.hotkeys)
-        storage.save_profiles(self.current_profile, self.profiles)
-
+        passphrase = self.profile_passphrase if self.profiles_encrypted else None
+        storage.save_profiles(self.current_profile, self.profiles, passphrase=passphrase)
+        
         def _normalize_profile_colors(self, colors: object) -> Dict[str, str]:
             if not isinstance(colors, dict):
                 return {}

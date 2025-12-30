@@ -1,3 +1,0 @@
--r requirements.txt
-keyboard
-pywin32

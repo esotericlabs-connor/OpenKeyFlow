@@ -1,12 +1,18 @@
 """Data storage helpers for OpenKeyFlow."""
 from __future__ import annotations
 
+import base64
 import csv
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
 
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from platformdirs import user_config_dir, user_data_dir
 
 APP_AUTHOR = "OpenKeyFlow"
@@ -32,9 +38,18 @@ DEFAULT_CONFIG = {
     "logging_enabled": False,
     "log_file": str(DEFAULT_LOG_FILE),
     "profile_colors": {},
+    "profiles_encrypted": False,
+    "use_clipboard": True,
 }
 
 DEFAULT_PROFILE_NAME = "main"
+ENCRYPTION_VERSION = 1
+PBKDF2_ITERATIONS = 200_000
+SALT_BYTES = 16
+NONCE_BYTES = 12
+
+class ProfilesEncryptionError(RuntimeError):
+    """Raised when encrypted profile data cannot be decrypted."""
 
 def _default_profiles() -> Dict[str, object]:
     return {
@@ -43,6 +58,58 @@ def _default_profiles() -> Dict[str, object]:
             DEFAULT_PROFILE_NAME: {},
         },
     }
+
+def _derive_key(passphrase: str, salt: bytes) -> bytes:
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=PBKDF2_ITERATIONS,
+    )
+    return kdf.derive(passphrase.encode("utf-8"))
+
+def _encode_bytes(value: bytes) -> str:
+    return base64.b64encode(value).decode("utf-8")
+
+def _decode_bytes(value: str) -> bytes:
+    return base64.b64decode(value.encode("utf-8"))
+
+def _encrypt_payload(payload: Dict[str, object], passphrase: str) -> Dict[str, str | int | bool]:
+    salt = os.urandom(SALT_BYTES)
+    nonce = os.urandom(NONCE_BYTES)
+    key = _derive_key(passphrase, salt)
+    aesgcm = AESGCM(key)
+    plaintext = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    ciphertext = aesgcm.encrypt(nonce, plaintext, None)
+    return {
+        "encrypted": True,
+        "version": ENCRYPTION_VERSION,
+        "salt": _encode_bytes(salt),
+        "nonce": _encode_bytes(nonce),
+        "data": _encode_bytes(ciphertext),
+    }
+
+def _decrypt_payload(payload: Dict[str, object], passphrase: str) -> Dict[str, object]:
+    if payload.get("version") != ENCRYPTION_VERSION:
+        raise ProfilesEncryptionError("Unsupported encrypted profiles version.")
+    try:
+        salt = _decode_bytes(str(payload["salt"]))
+        nonce = _decode_bytes(str(payload["nonce"]))
+        data = _decode_bytes(str(payload["data"]))
+    except KeyError as exc:
+        raise ProfilesEncryptionError("Encrypted profiles are missing required fields.") from exc
+    except (ValueError, TypeError) as exc:
+        raise ProfilesEncryptionError("Encrypted profiles contain invalid data.") from exc
+    key = _derive_key(passphrase, salt)
+    aesgcm = AESGCM(key)
+    try:
+        plaintext = aesgcm.decrypt(nonce, data, None)
+    except InvalidTag as exc:
+        raise ProfilesEncryptionError("Invalid passphrase or corrupted profiles data.") from exc
+    try:
+        return json.loads(plaintext.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ProfilesEncryptionError("Decrypted profiles are invalid JSON.") from exc
 
 def ensure_data_dir() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -93,14 +160,14 @@ def _migrate_legacy_data() -> None:
         except Exception:
             pass
 
-def load_hotkeys() -> Dict[str, str]:
-    current_profile, profiles = load_profiles()
+def load_hotkeys(*, passphrase: str | None = None) -> Dict[str, str]:
+    current_profile, profiles = load_profiles(passphrase=passphrase)
     return dict(profiles.get(current_profile, {}))
 
-def save_hotkeys(hotkeys: Dict[str, str]) -> None:
-    current_profile, profiles = load_profiles()
+def save_hotkeys(hotkeys: Dict[str, str], *, passphrase: str | None = None) -> None:
+    current_profile, profiles = load_profiles(passphrase=passphrase)
     profiles[current_profile] = dict(hotkeys)
-    save_profiles(current_profile, profiles)
+    save_profiles(current_profile, profiles, passphrase=passphrase)
 
 def _load_hotkeys_file() -> Dict[str, str]:
     with HOTKEYS_FILE.open("r", encoding="utf-8") as f:
@@ -114,7 +181,16 @@ def _load_hotkeys_file() -> Dict[str, str]:
         HOTKEYS_FILE.write_text("{}", encoding="utf-8")
     return {str(k): str(v) for k, v in data.items()}
 
-def load_profiles() -> Tuple[str, Dict[str, Dict[str, str]]]:
+def profiles_are_encrypted() -> bool:
+    if not PROFILES_FILE.exists():
+        return False
+    try:
+        raw = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+    return bool(isinstance(raw, dict) and raw.get("encrypted") is True)
+
+def load_profiles(*, passphrase: str | None = None) -> Tuple[str, Dict[str, Dict[str, str]]]:
     ensure_data_dir()
     if not PROFILES_FILE.exists():
         default_profiles = _default_profiles()
@@ -124,6 +200,11 @@ def load_profiles() -> Tuple[str, Dict[str, Dict[str, str]]]:
             data = json.load(f)
         except json.JSONDecodeError:
             data = {}
+    encrypted = bool(isinstance(data, dict) and data.get("encrypted") is True)
+    if encrypted:
+        if not passphrase:
+            raise ProfilesEncryptionError("Profiles are encrypted and require a passphrase.")
+        data = _decrypt_payload(data, passphrase)
     profiles_raw = data.get("profiles") if isinstance(data, dict) else {}
     if not isinstance(profiles_raw, dict):
         profiles_raw = {}
@@ -136,22 +217,26 @@ def load_profiles() -> Tuple[str, Dict[str, Dict[str, str]]]:
     current_profile = data.get("current_profile") if isinstance(data, dict) else None
     if not isinstance(current_profile, str) or current_profile not in profiles:
         current_profile = DEFAULT_PROFILE_NAME
-    save_profiles(current_profile, profiles)
+    save_profiles(current_profile, profiles, passphrase=passphrase if encrypted else None)
     return current_profile, profiles
 
-def save_profiles(current_profile: str, profiles: Dict[str, Dict[str, str]]) -> None:
+def save_profiles(
+    current_profile: str,
+    profiles: Dict[str, Dict[str, str]],
+    *,
+    passphrase: str | None = None,
+) -> None:
     ensure_data_dir()
     payload = {
         "current_profile": current_profile,
         "profiles": profiles,
     }
+    if passphrase:
+        payload_to_write: Dict[str, object] = _encrypt_payload(payload, passphrase)
+    else:
+        payload_to_write = payload
     with PROFILES_FILE.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
-
-def save_hotkeys(hotkeys: Dict[str, str]) -> None:
-    ensure_data_dir()
-    with HOTKEYS_FILE.open("w", encoding="utf-8") as f:
-        json.dump(hotkeys, f, indent=4, ensure_ascii=False)
+        json.dump(payload_to_write, f, indent=2, ensure_ascii=False)        
 
 def load_config() -> Dict[str, object]:
     ensure_data_dir()
