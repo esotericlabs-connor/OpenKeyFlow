@@ -18,8 +18,7 @@ def _project_root() -> Path:
 
 
 def _exec_command() -> list[str]:
-    return [sys.executable, "-m", "app"]
-
+    return [sys.executable, "-m", "openkeyflow"]
 
 def status() -> Tuple[bool, str | None]:
     system = platform.system()
@@ -74,7 +73,7 @@ def _enable_windows() -> Tuple[bool, str | None]:
         shell = Dispatch("WScript.Shell")
         link = shell.CreateShortcut(str(shortcut))
         link.TargetPath = str(Path(sys.executable))
-        link.Arguments = "-m app"
+        link.Arguments = "-m openkeyflow"
         link.WorkingDirectory = str(_project_root())
         link.IconLocation = link.TargetPath
         link.save()

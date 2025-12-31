@@ -35,7 +35,7 @@ D285C00096AC355C4C81D357D5CB578BE7F044C562270241B326C0D144427AA0
 
 ### Requirements
 - Windows 10/11, macOS, or Linux
-- Python 3.10+ (if running from source)  
+- Python 3.12 (if running from source)  
 - Or download the pre-built `.exe` from [Releases](#)
 
 ### Running from Source

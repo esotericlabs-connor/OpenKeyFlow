@@ -12,6 +12,8 @@ BASE_REQUIRED_IMPORTS: Sequence[str] = (
     "PyQt5",
     "pyperclip",
     "PIL",
+    "cryptography",
+    "platformdirs",
 )
 
 LINUX_GLOBAL_HOTKEY_REQUIREMENTS: Sequence[str] = (

@@ -55,9 +55,8 @@ def safe_write(
     backend: hooks.BaseHookBackend,
     *,
     paste_delay: float = 0.05,
-    use_clipboard: bool = True,
-    use_clipboard: bool = True,
     logger: Logger | None = None,
+    use_clipboard: bool = True,
 ) -> None:
     
     """Safely send text to the active window."""
@@ -98,6 +97,7 @@ class TriggerEngine:
         hotkeys: Dict[str, str] | None = None,
         cooldown: float = 0.3,
         paste_delay: float = 0.05,
+        use_clipboard: bool = True,
         fire_callback: Callable[[str, str], None] = _default_fire_callback,
         logger: Logger | None = None,
     ) -> None:
