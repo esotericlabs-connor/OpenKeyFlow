@@ -706,7 +706,6 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.engine = engine
         self.current_profile, self.profiles = storage.load_profiles(passphrase=profile_passphrase)
-        self.current_profile, self.profiles = storage.load_profiles()
         self.hotkeys: Dict[str, str] = dict(self.profiles.get(self.current_profile, {}))        
         self.config = storage.load_config()
         self.config["profiles_encrypted"] = profiles_encrypted
@@ -1343,9 +1342,9 @@ class MainWindow(QtWidgets.QMainWindow):
         passphrase = self.profile_passphrase if self.profiles_encrypted else None
         storage.save_profiles(self.current_profile, self.profiles, passphrase=passphrase)
         
-        def _normalize_profile_colors(self, colors: object) -> Dict[str, str]:
-            if not isinstance(colors, dict):
-                return {}
+    def _normalize_profile_colors(self, colors: object) -> Dict[str, str]:
+        if not isinstance(colors, dict):
+            return {}
         normalized: Dict[str, str] = {}
         for name, value in colors.items():
             if isinstance(name, str) and isinstance(value, str) and value.strip():
