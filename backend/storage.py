@@ -40,6 +40,7 @@ DEFAULT_CONFIG = {
     "cooldown": 0.3,
     "paste_delay": 0.05,
     "accepted_use_policy": False,
+    "quick_add_hotkey": "ctrl+f10",
     "logging_enabled": False,
     "log_file": str(DEFAULT_LOG_FILE),
     "profile_colors": {},

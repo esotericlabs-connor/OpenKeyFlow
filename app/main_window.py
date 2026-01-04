@@ -96,6 +96,17 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             block = block.next()
             top = bottom
             bottom = top + int(self.blockBoundingRect(block).height())
+            block_number += 1
+
+    def highlight_current_line(self) -> None:
+        selection = QtWidgets.QTextEdit.ExtraSelection()
+        line_color = QtGui.QColor(self.palette().color(QtGui.QPalette.Highlight))
+        line_color.setAlpha(40)
+        selection.format.setBackground(line_color)
+        selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+        selection.cursor = self.textCursor()
+        selection.cursor.clearSelection()
+        self.setExtraSelections([selection])
 
 class ProfileSwitchToast(QtWidgets.QWidget):
     def __init__(self, message: str, color: QtGui.QColor) -> None:
@@ -273,18 +284,7 @@ class UpdateCheckWorker(QtCore.QObject):
         up_to_date = compare_versions(APP_VERSION, latest) >= 0
         message = f"You're up to date (v{APP_VERSION})." if up_to_date else f"Update available: v{latest}."
         self.finished.emit(message, up_to_date)
-        block_number += 1
-
-    def highlight_current_line(self) -> None:
-        selection = QtWidgets.QTextEdit.ExtraSelection()
-        line_color = QtGui.QColor(self.palette().color(QtGui.QPalette.Highlight))
-        line_color.setAlpha(40)
-        selection.format.setBackground(line_color)
-        selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
-        selection.cursor = self.textCursor()
-        selection.cursor.clearSelection()
-        self.setExtraSelections([selection])
-
+        
 def autostart_supported() -> bool:
     _, error = autostart.status()
     return error is None
@@ -357,36 +357,20 @@ def readable_text_color(color: QtGui.QColor) -> QtGui.QColor:
     luminance = (0.299 * color.red()) + (0.587 * color.green()) + (0.114 * color.blue())
     return QtGui.QColor("#1c1c1c" if luminance > 165 else "#ffffff")
 
-def make_logo_pixmap(width: int = 220, height: int = 52) -> QtGui.QPixmap:
-    pixmap = QtGui.QPixmap(width, height)
-    pixmap.fill(QtCore.Qt.transparent)
-    painter = QtGui.QPainter(pixmap)
-    painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-
-    icon_size = height - 8
-    icon_rect = QtCore.QRect(4, 4, icon_size, icon_size)
-    icon_gradient = QtGui.QLinearGradient(icon_rect.topLeft(), icon_rect.bottomRight())
-    icon_gradient.setColorAt(0.0, QtGui.QColor("#ff6b6b"))
-    icon_gradient.setColorAt(1.0, QtGui.QColor("#7f7fd5"))
-    painter.setBrush(icon_gradient)
-    painter.setPen(QtGui.QPen(QtGui.QColor(20, 20, 30, 180), 1))
-    painter.drawRoundedRect(icon_rect, 6, 6)
-
-    line_pen = QtGui.QPen(QtGui.QColor(255, 255, 255, 200), 2)
-    painter.setPen(line_pen)
-    for offset in (10, 18, 26):
-        y = icon_rect.top() + offset
-        painter.drawLine(icon_rect.left() + 8, y, icon_rect.right() - 8, y)
-
-    text_rect = QtCore.QRect(icon_rect.right() + 10, 0, width - icon_rect.width() - 14, height)
-    font = QtGui.QFont()
-    font.setPointSize(18)
-    font.setBold(True)
-    painter.setFont(font)
-    painter.setPen(QtGui.QColor("#ffffff"))
-    painter.drawText(text_rect, QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, "OpenKeyFlow")
-    painter.end()
-    return pixmap
+def make_logo_pixmap(target_width: int = 220) -> QtGui.QPixmap:
+    logo_path = Path(__file__).resolve().parent.parent / "assets" / "ofk_logo.png"
+    pixmap = QtGui.QPixmap(str(logo_path))
+    if pixmap.isNull():
+        return pixmap
+    if pixmap.width() == 0:
+        return pixmap
+    target_height = round((pixmap.height() / pixmap.width()) * target_width)
+    return pixmap.scaled(
+        target_width,
+        target_height,
+        QtCore.Qt.KeepAspectRatio,
+        QtCore.Qt.SmoothTransformation,
+    )
 
 def validate_passphrase(passphrase: str) -> str | None:
     if len(passphrase) < 12:
@@ -497,6 +481,9 @@ def set_app_palette(dark: bool) -> None:
                 border: 1px solid #ff8080;
                 border-radius: 4px;
                 padding: 2px 4px;
+            }
+            QGroupBox::title {
+                color: #ffffff;
             }
             QHeaderView::section {
                 background-color: #1f1f24;
@@ -612,6 +599,102 @@ class SpecialAddDialog(QtWidgets.QDialog):
         self.trigger_edit.setText(trigger)
         super().accept()
 
+class QuickAddDialog(QtWidgets.QDialog):
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Quick Add")
+        if parent:
+            self.setWindowIcon(make_status_icon(getattr(parent, "enabled", True)))
+        self.setModal(True)
+        self.setWindowFlags(self.windowFlags() | QtCore.Qt.Tool)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        self.header_frame = QtWidgets.QFrame()
+        self.header_frame.setObjectName("quickAddHeader")
+        header_layout = QtWidgets.QVBoxLayout(self.header_frame)
+        header_layout.setContentsMargins(14, 10, 14, 10)
+        header_layout.setSpacing(4)
+        self.header_title = QtWidgets.QLabel("Quick Add from Clipboard")
+        title_font = self.header_title.font()
+        title_font.setPointSize(title_font.pointSize() + 1)
+        title_font.setBold(True)
+        self.header_title.setFont(title_font)
+        self.header_hint = QtWidgets.QLabel("Review the output, choose a trigger, then add.")
+        self.header_hint.setWordWrap(True)
+        header_layout.addWidget(self.header_title)
+        header_layout.addWidget(self.header_hint)
+        layout.addWidget(self.header_frame)
+
+        form_layout = QtWidgets.QFormLayout()
+        self.trigger_edit = QtWidgets.QLineEdit()
+        self.trigger_edit.setPlaceholderText("Trigger (no spaces)")
+        form_layout.addRow("Trigger:", self.trigger_edit)
+
+        self.output_edit = QtWidgets.QPlainTextEdit()
+        self.output_edit.setPlaceholderText("Expansion output")
+        self.output_edit.setLineWrapMode(QtWidgets.QPlainTextEdit.WidgetWidth)
+        self.output_edit.setMinimumHeight(140)
+        form_layout.addRow("Output:", self.output_edit)
+        layout.addLayout(form_layout)
+
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel | QtWidgets.QDialogButtonBox.Ok)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def set_header_color(self, color: QtGui.QColor) -> None:
+        text_color = readable_text_color(color)
+        self.header_frame.setStyleSheet(
+            (
+                "QFrame#quickAddHeader {"
+                f"background-color: {color.name()};"
+                f"color: {text_color.name()};"
+                "border-radius: 8px;"
+                "border: 1px solid rgba(0, 0, 0, 0.2);"
+                "}"
+            )
+        )
+
+    def set_clipboard_text(self, text: str) -> None:
+        self.set_data("", text, focus_trigger=True)
+
+    def set_data(self, trigger: str, output: str, *, focus_trigger: bool = False) -> None:
+        self.output_edit.setPlainText(output)
+        self.trigger_edit.setText(trigger)
+        self._resize_for_output(output)
+        if focus_trigger:
+            QtCore.QTimer.singleShot(0, self.trigger_edit.setFocus)
+
+    def _resize_for_output(self, text: str) -> None:
+        length = len(text)
+        lines = text.count("\n") + 1
+        if length > 1500 or lines > 20:
+            self.output_edit.setMinimumHeight(320)
+            self.resize(760, 520)
+        elif length > 500 or lines > 6:
+            self.output_edit.setMinimumHeight(240)
+            self.resize(640, 440)
+        else:
+            self.output_edit.setMinimumHeight(160)
+            self.resize(520, 340)
+
+    def get_data(self) -> tuple[str, str]:
+        return self.trigger_edit.text(), self.output_edit.toPlainText()
+
+    def accept(self) -> None:  # noqa: D401 - inherited docs
+        trigger = self.trigger_edit.text().strip()
+        output = self.output_edit.toPlainText()
+        if not trigger or not output.strip():
+            QtWidgets.QMessageBox.warning(self, "Quick Add", "Trigger and output are required.")
+            return
+        if " " in trigger:
+            QtWidgets.QMessageBox.warning(self, "Quick Add", "Triggers cannot contain spaces.")
+            return
+        self.trigger_edit.setText(trigger)
+        super().accept()
+
 class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, parent: "MainWindow") -> None:  # type: ignore[name-defined]
         super().__init__(parent)
@@ -627,10 +710,14 @@ class SettingsDialog(QtWidgets.QDialog):
 
         header_layout = QtWidgets.QHBoxLayout()
         self.logo_label = QtWidgets.QLabel()
-        self.logo_label.setPixmap(make_logo_pixmap())
+        logo_pixmap = make_logo_pixmap()
+        self.logo_label.setPixmap(logo_pixmap)
+        self.logo_label.setScaledContents(False)
+        self.logo_label.setFixedSize(logo_pixmap.size())
+        self.logo_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         self.logo_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
-        header_layout.addWidget(self.logo_label)
 
+        header_layout.addWidget(self.logo_label)
         header_layout.addStretch(1)
 
         updates_layout = QtWidgets.QVBoxLayout()
@@ -661,6 +748,16 @@ class SettingsDialog(QtWidgets.QDialog):
             hint.setWordWrap(True)
             general_layout.addWidget(hint)
         general_layout.addWidget(self.dark_mode_checkbox)
+        quick_add_row = QtWidgets.QHBoxLayout()
+        quick_add_label = QtWidgets.QLabel("Quick Add hotkey:")
+        self.quick_add_hotkey_edit = QtWidgets.QLineEdit(
+            str(self.window.config.get("quick_add_hotkey", "ctrl+f10")).strip().lower()
+        )
+        self.quick_add_hotkey_edit.setPlaceholderText("ctrl+f10")
+        self.quick_add_hotkey_edit.editingFinished.connect(self._on_quick_add_hotkey_changed)
+        quick_add_row.addWidget(quick_add_label)
+        quick_add_row.addWidget(self.quick_add_hotkey_edit, 1)
+        general_layout.addLayout(quick_add_row)
         layout.addWidget(general_group)
 
         data_group = QtWidgets.QGroupBox("Data & Import/Export")
@@ -835,6 +932,11 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def _on_dark_mode_toggled(self, checked: bool) -> None:
         self.window.set_dark_mode(checked)
+
+    def _on_quick_add_hotkey_changed(self) -> None:
+        hotkey = self.quick_add_hotkey_edit.text().strip().lower()
+        self.quick_add_hotkey_edit.setText(hotkey)
+        self.window.set_quick_add_hotkey(hotkey)
 
     def _on_logging_toggled(self, checked: bool) -> None:
         self.window.set_logging_enabled(checked, Path(self.log_path_edit.text()))
@@ -1023,6 +1125,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.logger: Logger = logger or get_logger()
         self.profile_passphrase = profile_passphrase
         self.profiles_encrypted = profiles_encrypted
+        self.quick_add_hotkey = str(self.config.get("quick_add_hotkey", "ctrl+f10")).strip().lower()
 
         self._allow_close = False
 
@@ -1191,13 +1294,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.engine.add_hotkey(
                 "ctrl+f11",
                 lambda: self._run_on_ui_thread(self.cycle_profile_hotkey),
-            )  
+            )
+            self._register_quick_add_hotkey(self.quick_add_hotkey)  
 
         self._was_hidden_to_tray = False
         self.settings_dialog: SettingsDialog | None = None
         self._tray_message_shown = False
         self._is_outputting = False
         self._profile_toast: ProfileSwitchToast | None = None
+        self._quick_add_toast: ProfileSwitchToast | None = None
+        self.quick_add_dialog: QuickAddDialog | None = None
 
         app = QtWidgets.QApplication.instance()
         if app:
@@ -1385,6 +1491,21 @@ class MainWindow(QtWidgets.QMainWindow):
         storage.save_config(self.config)
         if self.settings_dialog:
             self.settings_dialog._apply_section_title_style()
+
+    def set_quick_add_hotkey(self, hotkey: str) -> None:
+        normalized = hotkey.strip().lower()
+        previous = str(self.config.get("quick_add_hotkey", "ctrl+f10")).strip().lower()
+        if normalized == previous:
+            return
+        self.config["quick_add_hotkey"] = normalized
+        storage.save_config(self.config)
+        self.quick_add_hotkey = normalized
+        if not self.engine.hooks_available():
+            return
+        if previous:
+            self.engine.remove_hotkey(previous)
+        if normalized:
+            self._register_quick_add_hotkey(normalized)
 
     def set_logging_enabled(self, enabled: bool, path: Path | None = None) -> None:
         log_path = Path(path) if path else Path(self.config.get("log_file", storage.default_log_path()))
@@ -1631,6 +1752,8 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             self.engine.remove_hotkey("ctrl+f12")
             self.engine.remove_hotkey("ctrl+f11")
+            if self.quick_add_hotkey:
+                self.engine.remove_hotkey(self.quick_add_hotkey)
         except Exception:
             pass
         self._allow_close = True
@@ -1657,6 +1780,60 @@ class MainWindow(QtWidgets.QMainWindow):
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             trigger, output = dialog.get_data()
             self._add_hotkey(trigger, output)
+
+    def open_quick_add_from_clipboard(self) -> None:
+        clipboard = QtWidgets.QApplication.clipboard()
+        if clipboard is None:
+            self._show_quick_add_toast("Clipboard has no text to add")
+            return
+        mime = clipboard.mimeData()
+        if mime is None or not mime.hasText():
+            self._show_quick_add_toast("Clipboard has no text to add")
+            return
+        text = mime.text()
+        if not text.strip():
+            self._show_quick_add_toast("Clipboard has no text to add")
+            return
+
+        active_modal = QtWidgets.QApplication.activeModalWidget()
+        if active_modal is not None and not isinstance(active_modal, QuickAddDialog):
+            active_modal.raise_()
+            active_modal.activateWindow()
+            return
+
+        self.logger.info("[QUICK_ADD] opened, clipboard_len=%s", len(text))
+        dialog = active_modal if isinstance(active_modal, QuickAddDialog) else self._get_quick_add_dialog()
+        dialog.set_clipboard_text(text)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def open_quick_add_from_clipboard(self) -> None:
+        clipboard = QtWidgets.QApplication.clipboard()
+        if clipboard is None:
+            self._show_quick_add_toast("Clipboard has no text to add")
+            return
+        mime = clipboard.mimeData()
+        if mime is None or not mime.hasText():
+            self._show_quick_add_toast("Clipboard has no text to add")
+            return
+        text = mime.text()
+        if not text.strip():
+            self._show_quick_add_toast("Clipboard has no text to add")
+            return
+
+        active_modal = QtWidgets.QApplication.activeModalWidget()
+        if active_modal is not None and not isinstance(active_modal, QuickAddDialog):
+            active_modal.raise_()
+            active_modal.activateWindow()
+            return
+
+        self.logger.info("[QUICK_ADD] opened, clipboard_len=%s", len(text))
+        dialog = active_modal if isinstance(active_modal, QuickAddDialog) else self._get_quick_add_dialog()
+        dialog.set_clipboard_text(text)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _add_hotkey(self, trigger: str, output: str) -> bool:
         normalized_trigger = trigger.strip()
@@ -1918,6 +2095,40 @@ class MainWindow(QtWidgets.QMainWindow):
         message = f"Switched to profile: {profile_name}"
         self._profile_toast = ProfileSwitchToast(message, color)
         self._profile_toast.show_toast()
+
+    def _show_quick_add_toast(self, message: str) -> None:
+        color = QtGui.QColor("#f1c40f")
+        if self._quick_add_toast is not None:
+            self._quick_add_toast.close()
+        self._quick_add_toast = ProfileSwitchToast(message, color)
+        self._quick_add_toast.show_toast()
+
+    def _register_quick_add_hotkey(self, hotkey: str) -> None:
+        if not hotkey:
+            return
+        self.engine.add_hotkey(
+            hotkey,
+            lambda: self._run_on_ui_thread(self.open_quick_add_from_clipboard),
+        )
+
+    def _get_quick_add_dialog(self) -> QuickAddDialog:
+        if self.quick_add_dialog is None:
+            dialog = QuickAddDialog(self)
+            dialog.accepted.connect(self._on_quick_add_accepted)
+            self.quick_add_dialog = dialog
+        color_hex = self.profile_color(self.current_profile) or "#f1c40f"
+        self.quick_add_dialog.set_header_color(QtGui.QColor(color_hex))
+        return self.quick_add_dialog
+
+    def _on_quick_add_accepted(self) -> None:
+        if self.quick_add_dialog is None:
+            return
+        trigger, output = self.quick_add_dialog.get_data()
+        if not self._add_hotkey(trigger, output):
+            self.quick_add_dialog.set_data(trigger, output, focus_trigger=True)
+            self.quick_add_dialog.show()
+            self.quick_add_dialog.raise_()
+            self.quick_add_dialog.activateWindow()
 
     def current_os_label(self) -> str:
         platform = sys.platform
