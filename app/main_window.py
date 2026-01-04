@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import json
+import secrets
+import sys
 import threading
+import urllib.request
 from pathlib import Path
 from typing import Dict
 
-import logging
+import logging 
+import Logger
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets, QtPrintSupport
 
 from backend import autostart
 from backend import storage
@@ -16,6 +20,7 @@ from backend.logging_utils import configure_logging, get_logger
 from backend.trigger_engine import TriggerEngine
 
 APP_NAME = "OpenKeyFlow"
+APP_VERSION = "1.0.0"
 HOTKEY_CLIPBOARD_PREFIX = "OpenKeyFlowHotkeys:"
 
 class LineNumberArea(QtWidgets.QWidget):
@@ -92,7 +97,184 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             block = block.next()
             top = bottom
             bottom = top + int(self.blockBoundingRect(block).height())
-            block_number += 1
+
+class ProfileSwitchToast(QtWidgets.QWidget):
+    def __init__(self, message: str, color: QtGui.QColor) -> None:
+        super().__init__(None, QtCore.Qt.Tool | QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
+        self.setAttribute(QtCore.Qt.WA_ShowWithoutActivating)
+        self.setFocusPolicy(QtCore.Qt.NoFocus)
+
+        container = QtWidgets.QFrame(self)
+        container.setObjectName("toastContainer")
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(8)
+
+        label = QtWidgets.QLabel(message)
+        label.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(label)
+
+        text_color = readable_text_color(color)
+        container.setStyleSheet(
+            (
+                "QFrame#toastContainer {"
+                f"background-color: {color.name()};"
+                f"color: {text_color.name()};"
+                "border-radius: 8px;"
+                "border: 1px solid rgba(0, 0, 0, 0.2);"
+                "}"
+            )
+        )
+
+        outer_layout = QtWidgets.QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.addWidget(container)
+
+        self._opacity_effect = QtWidgets.QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._opacity_effect)
+        self._animation = QtCore.QPropertyAnimation(self._opacity_effect, b"opacity", self)
+        self._animation.setDuration(4500)
+        self._animation.setStartValue(0.0)
+        self._animation.setKeyValueAt(0.15, 1.0)
+        self._animation.setKeyValueAt(0.85, 1.0)
+        self._animation.setEndValue(0.0)
+        self._animation.finished.connect(self.close)
+
+    def show_toast(self) -> None:
+        screen = QtWidgets.QApplication.primaryScreen()
+        if not screen:
+            return
+        geometry = screen.availableGeometry()
+        self.adjustSize()
+        width = max(260, self.sizeHint().width())
+        self.resize(width, self.sizeHint().height())
+        x = geometry.x() + (geometry.width() - self.width()) // 2
+        y = geometry.y() + 24
+        self.move(x, y)
+        self.show()
+        self._animation.start()
+
+class PassphraseDialog(QtWidgets.QDialog):
+    def __init__(self, parent: QtWidgets.QWidget, title: str, prompt: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self._passphrase = ""
+        self.recovery_code = secrets.token_hex(8).upper()
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        prompt_label = QtWidgets.QLabel(prompt)
+        prompt_label.setWordWrap(True)
+        layout.addWidget(prompt_label)
+
+        self.passphrase_edit = QtWidgets.QLineEdit()
+        self.passphrase_edit.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.passphrase_edit.setPlaceholderText("Enter passphrase")
+        layout.addWidget(self.passphrase_edit)
+
+        self.confirm_edit = QtWidgets.QLineEdit()
+        self.confirm_edit.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.confirm_edit.setPlaceholderText("Confirm passphrase")
+        layout.addWidget(self.confirm_edit)
+
+        requirements = QtWidgets.QLabel(
+            "Requirements: at least 12 characters, includes letters, numbers, and one symbol."
+        )
+        requirements.setWordWrap(True)
+        layout.addWidget(requirements)
+
+        recovery_group = QtWidgets.QGroupBox("Recovery Code")
+        recovery_layout = QtWidgets.QVBoxLayout(recovery_group)
+        recovery_hint = QtWidgets.QLabel(
+            "Keep this recovery code in a safe place. You can copy, select, or print it."
+        )
+        recovery_hint.setWordWrap(True)
+        recovery_layout.addWidget(recovery_hint)
+
+        recovery_row = QtWidgets.QHBoxLayout()
+        self.recovery_edit = QtWidgets.QLineEdit(self.recovery_code)
+        self.recovery_edit.setReadOnly(True)
+        self.recovery_edit.setCursorPosition(0)
+        self.recovery_edit.setMinimumWidth(220)
+        recovery_row.addWidget(self.recovery_edit, 1)
+
+        copy_btn = QtWidgets.QPushButton("Copy")
+        copy_btn.clicked.connect(self._copy_recovery_code)
+        recovery_row.addWidget(copy_btn)
+
+        print_btn = QtWidgets.QPushButton("Print")
+        print_btn.clicked.connect(self._print_recovery_code)
+        recovery_row.addWidget(print_btn)
+
+        recovery_layout.addLayout(recovery_row)
+        layout.addWidget(recovery_group)
+
+        self.error_label = QtWidgets.QLabel()
+        self.error_label.setStyleSheet("color: #ff6b6b;")
+        self.error_label.setWordWrap(True)
+        layout.addWidget(self.error_label)
+
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _copy_recovery_code(self) -> None:
+        QtWidgets.QApplication.clipboard().setText(self.recovery_code)
+        self.recovery_edit.selectAll()
+
+    def _print_recovery_code(self) -> None:
+        printer = QtPrintSupport.QPrinter()
+        dialog = QtPrintSupport.QPrintDialog(printer, self)
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        doc = QtGui.QTextDocument()
+        doc.setPlainText(
+            "OpenKeyFlow Recovery Code\n\n"
+            f"{self.recovery_code}\n\n"
+            "Store this recovery code securely."
+        )
+        doc.print_(printer)
+
+    def _on_accept(self) -> None:
+        passphrase = self.passphrase_edit.text().strip()
+        confirm = self.confirm_edit.text().strip()
+        error = validate_passphrase(passphrase)
+        if error:
+            self.error_label.setText(error)
+            return
+        if passphrase != confirm:
+            self.error_label.setText("Passphrases do not match.")
+            return
+        self._passphrase = passphrase
+        self.accept()
+
+    def passphrase(self) -> str:
+        return self._passphrase
+
+class UpdateCheckWorker(QtCore.QObject):
+    finished = QtCore.pyqtSignal(str, bool)
+    failed = QtCore.pyqtSignal(str)
+
+    def __init__(self, os_name: str) -> None:
+        super().__init__()
+        self.os_name = os_name
+
+    def run(self) -> None:
+        try:
+            latest = fetch_latest_version(self.os_name)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+            return
+        if not latest:
+            self.failed.emit("No releases found.")
+            return
+        up_to_date = compare_versions(APP_VERSION, latest) >= 0
+        message = f"You're up to date (v{APP_VERSION})." if up_to_date else f"Update available: v{latest}."
+        self.finished.emit(message, up_to_date)
+        block_number += 1
 
     def highlight_current_line(self) -> None:
         selection = QtWidgets.QTextEdit.ExtraSelection()
@@ -175,6 +357,83 @@ def make_color_icon(color: QtGui.QColor, size: int = 12) -> QtGui.QIcon:
 def readable_text_color(color: QtGui.QColor) -> QtGui.QColor:
     luminance = (0.299 * color.red()) + (0.587 * color.green()) + (0.114 * color.blue())
     return QtGui.QColor("#1c1c1c" if luminance > 165 else "#ffffff")
+
+def make_logo_pixmap(width: int = 220, height: int = 52) -> QtGui.QPixmap:
+    pixmap = QtGui.QPixmap(width, height)
+    pixmap.fill(QtCore.Qt.transparent)
+    painter = QtGui.QPainter(pixmap)
+    painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+
+    icon_size = height - 8
+    icon_rect = QtCore.QRect(4, 4, icon_size, icon_size)
+    icon_gradient = QtGui.QLinearGradient(icon_rect.topLeft(), icon_rect.bottomRight())
+    icon_gradient.setColorAt(0.0, QtGui.QColor("#ff6b6b"))
+    icon_gradient.setColorAt(1.0, QtGui.QColor("#7f7fd5"))
+    painter.setBrush(icon_gradient)
+    painter.setPen(QtGui.QPen(QtGui.QColor(20, 20, 30, 180), 1))
+    painter.drawRoundedRect(icon_rect, 6, 6)
+
+    line_pen = QtGui.QPen(QtGui.QColor(255, 255, 255, 200), 2)
+    painter.setPen(line_pen)
+    for offset in (10, 18, 26):
+        y = icon_rect.top() + offset
+        painter.drawLine(icon_rect.left() + 8, y, icon_rect.right() - 8, y)
+
+    text_rect = QtCore.QRect(icon_rect.right() + 10, 0, width - icon_rect.width() - 14, height)
+    font = QtGui.QFont()
+    font.setPointSize(18)
+    font.setBold(True)
+    painter.setFont(font)
+    painter.setPen(QtGui.QColor("#ffffff"))
+    painter.drawText(text_rect, QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, "OpenKeyFlow")
+    painter.end()
+    return pixmap
+
+def validate_passphrase(passphrase: str) -> str | None:
+    if len(passphrase) < 12:
+        return "Passphrase must be at least 12 characters long."
+    if not any(char.isalpha() for char in passphrase):
+        return "Passphrase must include at least one letter."
+    if not any(char.isdigit() for char in passphrase):
+        return "Passphrase must include at least one number."
+    if not any(not char.isalnum() for char in passphrase):
+        return "Passphrase must include at least one symbol."
+    return None
+
+def compare_versions(current: str, latest: str) -> int:
+    def parse(version: str) -> tuple[int, ...]:
+        parts = [part for part in version.strip().lstrip("vV").split(".") if part]
+        return tuple(int(part) for part in parts if part.isdigit() or part.isnumeric())
+
+    current_parts = parse(current)
+    latest_parts = parse(latest)
+    if current_parts == latest_parts:
+        return 0
+    if current_parts > latest_parts:
+        return 1
+    return -1
+
+def fetch_latest_version(os_name: str) -> str | None:
+    url = f"https://api.github.com/repos/esoteriklabs-connor/OpenKeyFlow/contents/dist/{os_name}"
+    request = urllib.request.Request(url, headers={"User-Agent": "OpenKeyFlow"})
+    with urllib.request.urlopen(request, timeout=8) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, list):
+        return None
+    versions = []
+    for entry in payload:
+        if entry.get("type") != "dir":
+            continue
+        name = entry.get("name")
+        if isinstance(name, str) and name:
+            versions.append(name)
+    if not versions:
+        return None
+    def parse_version(value: str) -> tuple[int, ...]:
+        return tuple(int(part) for part in value.strip().lstrip("vV").split(".") if part.isdigit())
+
+    versions.sort(key=parse_version)
+    return versions[-1]
 
 def make_gear_icon(palette: QtGui.QPalette, size: int = 18) -> QtGui.QIcon:
     pixmap = QtGui.QPixmap(size, size)
@@ -364,6 +623,26 @@ class SettingsDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout(self)
 
+        self._update_thread: QtCore.QThread | None = None
+        self._update_worker: UpdateCheckWorker | None = None
+
+        header_layout = QtWidgets.QHBoxLayout()
+        self.logo_label = QtWidgets.QLabel()
+        self.logo_label.setPixmap(make_logo_pixmap())
+        self.logo_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        header_layout.addWidget(self.logo_label)
+
+        header_layout.addStretch(1)
+
+        updates_layout = QtWidgets.QVBoxLayout()
+        self.update_btn = QtWidgets.QPushButton("Check for updates")
+        self.update_btn.clicked.connect(self._on_check_updates)
+        updates_layout.addWidget(self.update_btn)
+        self.update_status_label = QtWidgets.QLabel("Update status: not checked.")
+        self.update_status_label.setWordWrap(True)
+        updates_layout.addWidget(self.update_status_label)
+        header_layout.addLayout(updates_layout)
+        layout.addLayout(header_layout)
 
         general_group = QtWidgets.QGroupBox("General")
         general_layout = QtWidgets.QVBoxLayout(general_group)
@@ -389,10 +668,13 @@ class SettingsDialog(QtWidgets.QDialog):
         data_layout = QtWidgets.QHBoxLayout(data_group)
         import_btn = QtWidgets.QPushButton("Import CSV")
         export_btn = QtWidgets.QPushButton("Export CSV")
+        export_sample_btn = QtWidgets.QPushButton("Export Sample CSV")
         import_btn.clicked.connect(self.window.import_csv)
         export_btn.clicked.connect(self.window.export_csv)
+        export_sample_btn.clicked.connect(self.window.export_sample_csv)
         data_layout.addWidget(import_btn)
         data_layout.addWidget(export_btn)
+        data_layout.addWidget(export_sample_btn)
         layout.addWidget(data_group)
 
         privacy_group = QtWidgets.QGroupBox("Privacy & Security")
@@ -569,6 +851,29 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def _on_change_passphrase(self) -> None:
         self.window.change_profiles_passphrase()
+
+    def _on_check_updates(self) -> None:
+        self.update_btn.setEnabled(False)
+        self.update_status_label.setText("Update status: checking...")
+        os_name = self.window.current_os_label()
+        self._update_thread = QtCore.QThread(self)
+        self._update_worker = UpdateCheckWorker(os_name)
+        self._update_worker.moveToThread(self._update_thread)
+        self._update_thread.started.connect(self._update_worker.run)
+        self._update_worker.finished.connect(self._on_update_finished)
+        self._update_worker.failed.connect(self._on_update_failed)
+        self._update_worker.finished.connect(self._update_thread.quit)
+        self._update_worker.failed.connect(self._update_thread.quit)
+        self._update_thread.finished.connect(self._update_thread.deleteLater)
+        self._update_thread.start()
+
+    def _on_update_finished(self, message: str, _up_to_date: bool) -> None:
+        self.update_status_label.setText(f"Update status: {message}")
+        self.update_btn.setEnabled(True)
+
+    def _on_update_failed(self, message: str) -> None:
+        self.update_status_label.setText(f"Update status: {message}")
+        self.update_btn.setEnabled(True)
 
     def _on_choose_log_path(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Select log file", self.log_path_edit.text(), "Log files (*.log)")
@@ -871,14 +1176,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tray.setToolTip(APP_NAME)
         self.tray.show()
         self._refresh_tray_profile_menu()
-        self._tray_flash_timer = QtCore.QTimer(self)
-        self._tray_flash_timer.setInterval(160)
-        self._tray_flash_timer.timeout.connect(self._toggle_tray_flash_icon)
-        self._tray_flash_icons = (
-            make_status_icon(True, override_color=QtGui.QColor("#2ecc71")),
-            make_status_icon(True, override_color=QtGui.QColor("#f1c40f")),
-        )
-        self._tray_flash_index = 0
+        self._tray_active_icon = make_status_icon(True, override_color=QtGui.QColor("#f1c40f"))
         self._active_fire_count = 0
 
         self.engine.set_fire_hooks(
@@ -887,11 +1185,14 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         if self.engine.hooks_available():
-            self.engine.add_hotkey("ctrl+f12", self.toggle_enabled)    
+            self.engine.add_hotkey("ctrl+f12", self.toggle_enabled)
+            self.engine.add_hotkey("ctrl+f11", self.cycle_profile_hotkey)        
 
         self._was_hidden_to_tray = False
         self.settings_dialog: SettingsDialog | None = None
         self._tray_message_shown = False
+        self._is_outputting = False
+        self._profile_toast: ProfileSwitchToast | None = None
 
         app = QtWidgets.QApplication.instance()
         if app:
@@ -921,7 +1222,7 @@ class MainWindow(QtWidgets.QMainWindow):
         app = QtWidgets.QApplication.instance()
         if app:
             app.setWindowIcon(status_icon)
-        if self.tray is not None and not self._tray_flash_timer.isActive():
+        if self.tray is not None and not self._is_outputting:
             self.tray.setIcon(status_icon)
 
     def _apply_table_header_theme(self) -> None:
@@ -1041,25 +1342,18 @@ class MainWindow(QtWidgets.QMainWindow):
     def _start_tray_flash(self) -> None:
         self._active_fire_count += 1
         if self._active_fire_count == 1:
-            self._tray_flash_index = 0
-            self._tray_flash_timer.start()
+            self._is_outputting = True
             if self.tray is not None:
-                self.tray.setIcon(self._tray_flash_icons[self._tray_flash_index])
+                self.tray.setIcon(self._tray_active_icon)
 
     def _stop_tray_flash(self) -> None:
         if self._active_fire_count == 0:
             return
         self._active_fire_count -= 1
         if self._active_fire_count == 0:
-            self._tray_flash_timer.stop()
+            self._is_outputting = False
             if self.tray is not None:
                 self.tray.setIcon(make_status_icon(self.enabled))
-
-    def _toggle_tray_flash_icon(self) -> None:
-        if self.tray is None:
-            return
-        self._tray_flash_index = 1 - self._tray_flash_index
-        self.tray.setIcon(self._tray_flash_icons[self._tray_flash_index])
 
     def _on_focus_changed(self, _old: QtWidgets.QWidget | None, _new: QtWidgets.QWidget | None) -> None:
         app = QtWidgets.QApplication.instance()
@@ -1111,13 +1405,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_profiles_encrypted(self, enabled: bool) -> bool:
         if enabled:
-            passphrase = self._prompt_passphrase(
+            result = self._prompt_new_passphrase(
                 "Encrypt Profiles",
                 "Create a passphrase:",
-                confirm=True,
             )
-            if not passphrase:
+            if not result:
                 return False
+            passphrase, recovery_code = result
             try:
                 storage.save_profiles(self.current_profile, self.profiles, passphrase=passphrase)
             except Exception as exc:
@@ -1130,6 +1424,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.profiles_encrypted = True
             self.profile_passphrase = passphrase
             self.config["profiles_encrypted"] = True
+            self.config["profile_recovery_code"] = recovery_code
             storage.save_config(self.config)
             return True
 
@@ -1181,13 +1476,13 @@ class MainWindow(QtWidgets.QMainWindow):
         except storage.ProfilesEncryptionError as exc:
             QtWidgets.QMessageBox.warning(self, "Change Passphrase", str(exc))
             return
-        new_passphrase = self._prompt_passphrase(
+        result = self._prompt_new_passphrase(
             "Change Passphrase",
             "Enter a new passphrase:",
-            confirm=True,
         )
-        if not new_passphrase:
+        if not result:
             return
+        new_passphrase, recovery_code = result
         try:
             storage.save_profiles(self.current_profile, self.profiles, passphrase=new_passphrase)
         except Exception as exc:
@@ -1199,6 +1494,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.profile_passphrase = new_passphrase
         self.config["profiles_encrypted"] = True
+        self.config["profile_recovery_code"] = recovery_code
         storage.save_config(self.config)
 
     def _prompt_passphrase(self, title: str, prompt: str, *, confirm: bool = False) -> str | None:
@@ -1230,6 +1526,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 return None
         return passphrase
+
+    def _prompt_new_passphrase(self, title: str, prompt: str) -> tuple[str, str] | None:
+        dialog = PassphraseDialog(self, title, prompt)
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return None
+        passphrase = dialog.passphrase()
+        if not passphrase:
+            return None
+        return passphrase, dialog.recovery_code
 
     def update_autostart(self, enabled: bool) -> bool:
         return set_autostart_enabled(self, enabled)
@@ -1310,6 +1615,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def quit_app(self) -> None:
         try:
             self.engine.remove_hotkey("ctrl+f12")
+            self.engine.remove_hotkey("ctrl+f11")
         except Exception:
             pass
         self._allow_close = True
@@ -1421,17 +1727,21 @@ class MainWindow(QtWidgets.QMainWindow):
     def import_csv(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Import CSV", "", "CSV Files (*.csv)")
         if not path:
+            return        
+        incoming = list(storage.import_hotkeys_from_csv(Path(path)))
+        if not incoming:
+            QtWidgets.QMessageBox.information(self, "Import", "No hotkeys found to import.")
             return
-        added = 0
-        with self.hotkey_lock:
-            for trigger, output in storage.import_hotkeys_from_csv(Path(path)):
-                self.hotkeys[trigger] = output
-                added += 1
-        self._save_current_profile()
-        self.engine.update_hotkeys(self.hotkeys)
-        self.populate_model()
-        self.refresh_status_ui()
-        QtWidgets.QMessageBox.information(self, "Import", f"Imported {added} hotkeys.")
+        choice = self._prompt_import_destination(len(incoming))
+        if not choice:
+            return
+        profile_name, switch_to = choice
+        added = self._import_hotkeys_to_profile(profile_name, incoming, switch_to)
+        QtWidgets.QMessageBox.information(
+            self,
+            "Import",
+            f"Imported {added} hotkeys into '{profile_name}'.",
+        )
 
     def export_csv(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export CSV", "", "CSV Files (*.csv)")
@@ -1439,6 +1749,120 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         storage.export_hotkeys_to_csv(Path(path), self.hotkeys)
         QtWidgets.QMessageBox.information(self, "Export", f"Exported {len(self.hotkeys)} hotkeys.")
+
+    def export_sample_csv(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export Sample CSV", "", "CSV Files (*.csv)")
+        if not path:
+            return
+        storage.export_sample_csv(Path(path))
+        QtWidgets.QMessageBox.information(self, "Export Sample CSV", "Exported a sample CSV template.")
+
+    def cycle_profile_hotkey(self) -> None:
+        profile_names = self.profile_names()
+        if len(profile_names) <= 1:
+            return
+        try:
+            current_index = profile_names.index(self.current_profile)
+        except ValueError:
+            current_index = 0
+        next_index = (current_index + 1) % len(profile_names)
+        next_profile = profile_names[next_index]
+        self.set_current_profile(next_profile, announce=True)
+
+    def _prompt_import_destination(self, count: int) -> tuple[str, bool] | None:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Import Hotkeys")
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        prompt = QtWidgets.QLabel(
+            f"Found {count} hotkeys to import. Choose a destination profile:"
+        )
+        prompt.setWordWrap(True)
+        layout.addWidget(prompt)
+
+        combo = QtWidgets.QComboBox()
+        for name in self.profile_names():
+            combo.addItem(name, name)
+        combo.addItem("Create new profile…", "__new__")
+        layout.addWidget(combo)
+
+        new_name_edit = QtWidgets.QLineEdit()
+        new_name_edit.setPlaceholderText("New profile name")
+        new_name_edit.setVisible(False)
+        layout.addWidget(new_name_edit)
+
+        switch_checkbox = QtWidgets.QCheckBox("Switch to selected profile after import")
+        switch_checkbox.setChecked(True)
+        layout.addWidget(switch_checkbox)
+
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+
+        def on_selection_changed(index: int) -> None:
+            is_new = combo.itemData(index) == "__new__"
+            new_name_edit.setVisible(is_new)
+            if is_new:
+                switch_checkbox.setChecked(True)
+
+        def on_accept() -> None:
+            if combo.currentData() == "__new__":
+                name = self._normalize_profile_name(new_name_edit.text())
+                if not name:
+                    QtWidgets.QMessageBox.warning(dialog, "Import Hotkeys", "Profile name cannot be empty.")
+                    return
+                if name in self.profiles:
+                    QtWidgets.QMessageBox.warning(dialog, "Import Hotkeys", "That profile already exists.")
+                    return
+            dialog.accept()
+
+        combo.currentIndexChanged.connect(on_selection_changed)
+        buttons.accepted.connect(on_accept)
+        buttons.rejected.connect(dialog.reject)
+
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return None
+
+        if combo.currentData() == "__new__":
+            profile_name = self._normalize_profile_name(new_name_edit.text())
+        else:
+            profile_name = combo.currentData()
+
+        if not profile_name:
+            return None
+
+        return profile_name, switch_checkbox.isChecked()
+
+    def _import_hotkeys_to_profile(
+        self,
+        profile_name: str,
+        incoming: list[tuple[str, str]],
+        switch_to: bool,
+    ) -> int:
+        added = 0
+        with self.hotkey_lock:
+            self.profiles[self.current_profile] = dict(self.hotkeys)
+            profile_hotkeys = dict(self.profiles.get(profile_name, {}))
+            for trigger, output in incoming:
+                profile_hotkeys[trigger] = output
+                added += 1
+            self.profiles[profile_name] = profile_hotkeys
+
+        if switch_to:
+            self.current_profile = profile_name
+            self.hotkeys = dict(self.profiles[profile_name])
+            self.engine.update_hotkeys(self.hotkeys)
+            self.populate_model()
+            self.refresh_status_ui()
+        elif profile_name == self.current_profile:
+            self.hotkeys = dict(self.profiles[profile_name])
+            self.engine.update_hotkeys(self.hotkeys)
+            self.populate_model()
+            self.refresh_status_ui()
+
+        passphrase = self.profile_passphrase if self.profiles_encrypted else None
+        storage.save_profiles(self.current_profile, self.profiles, passphrase=passphrase)
+        self._sync_profile_ui()
+        return added
 
     def toggle_enabled(self) -> None:
         self.enabled = self.engine.toggle_enabled()
@@ -1470,6 +1894,25 @@ class MainWindow(QtWidgets.QMainWindow):
         storage.save_config(self.config)
         self._apply_profile_button_color()
         self._sync_profile_ui()
+
+    def _show_profile_switch_toast(self, profile_name: str) -> None:
+        color_hex = self.profile_color(profile_name) or "#f1c40f"
+        color = QtGui.QColor(color_hex)
+        if self._profile_toast is not None:
+            self._profile_toast.close()
+        message = f"Switched to profile: {profile_name}"
+        self._profile_toast = ProfileSwitchToast(message, color)
+        self._profile_toast.show_toast()
+
+    def current_os_label(self) -> str:
+        platform = sys.platform
+        if platform.startswith("win"):
+            return "windows"
+        if platform.startswith("linux"):
+            return "linux"
+        if platform.startswith("darwin"):
+            return "macos"
+        return "windows"
 
     def _refresh_profile_combo(self) -> None:
         self._refresh_profile_menu()
@@ -1680,7 +2123,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_profile_ui()
         return True
 
-    def set_current_profile(self, profile_name: str) -> bool:
+    def set_current_profile(self, profile_name: str, *, announce: bool = False) -> bool:
         if profile_name not in self.profiles:
             return False
         if profile_name == self.current_profile:
@@ -1692,4 +2135,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.populate_model()
         self.refresh_status_ui()
         self._sync_profile_ui()
+        if announce:
+            self._show_profile_switch_toast(profile_name)
         return True

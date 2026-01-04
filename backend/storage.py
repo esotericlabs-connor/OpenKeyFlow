@@ -28,6 +28,11 @@ HOTKEYS_FILE = DATA_DIR / "hotkeys.json"
 PROFILES_FILE = DATA_DIR / "profiles.json"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 CSV_TEMPLATE = DATA_DIR / "export_sample.csv"
+CSV_HEADERS = ("Trigger", "Output")
+CSV_SAMPLE_ROWS = (
+    ("SAMPLE_HOTKEY", "SAMPLE_OUTPUT"),
+    ("SAMPLE_HOTKEY_2", "SAMPLE_OUTPUT_2"),
+)
 DEFAULT_LOG_FILE = DATA_DIR / "openkeyflow.log"
 
 DEFAULT_CONFIG = {
@@ -39,6 +44,7 @@ DEFAULT_CONFIG = {
     "log_file": str(DEFAULT_LOG_FILE),
     "profile_colors": {},
     "profiles_encrypted": False,
+    "profile_recovery_code": None,
 }
 
 DEFAULT_PROFILE_NAME = "main"
@@ -128,9 +134,7 @@ def ensure_data_dir() -> None:
     if not CONFIG_FILE.exists():
         CONFIG_FILE.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
     if not CSV_TEMPLATE.exists():
-        with CSV_TEMPLATE.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-            writer.writerow(["Trigger", "Output"])
+        export_sample_csv(CSV_TEMPLATE)
 
 def _migrate_legacy_data() -> None:
     legacy_dir = _legacy_data_dir()
@@ -259,20 +263,65 @@ def export_hotkeys_to_csv(path: Path, hotkeys: Dict[str, str]) -> None:
     path = Path(path)
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-        writer.writerow(["Trigger", "Output"])
+        writer.writerow(list(CSV_HEADERS))
         for trigger, output in hotkeys.items():
             writer.writerow([trigger, output])
 
+def export_sample_csv(path: Path) -> None:
+    path = Path(path)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+        writer.writerow(list(CSV_HEADERS))
+        for trigger, output in CSV_SAMPLE_ROWS:
+            writer.writerow([trigger, output])
+        writer.writerow(["", ""])
 
 def import_hotkeys_from_csv(path: Path) -> Iterable[Tuple[str, str]]:
     path = Path(path)
     with path.open("r", encoding="utf-8") as f:
-        reader = csv.DictReader(f, skipinitialspace=True)
-        for row in reader:
-            trigger = (row.get("Trigger") or row.get("trigger") or row.get("Hotkey") or "").strip()
-            output = (row.get("Output") or row.get("output") or row.get("Text") or "").strip()
-            if trigger and output:
-                yield trigger, output
+        reader = csv.reader(f)
+        rows = list(reader)
+    if not rows:
+        return []
+    header = rows[0] if rows else []
+    header_normalized = [value.strip().lower() for value in header]
+    use_dict_reader = False
+    if "trigger" in header_normalized and "output" in header_normalized:
+        use_dict_reader = True
+    elif "hotkey" in header_normalized and "output" in header_normalized:
+        use_dict_reader = True
+    if use_dict_reader:
+        with path.open("r", encoding="utf-8") as f:
+            dict_reader = csv.DictReader(f, skipinitialspace=True)
+            for row in dict_reader:
+                trigger = (row.get("Trigger") or row.get("trigger") or row.get("Hotkey") or "").strip()
+                output = (row.get("Output") or row.get("output") or row.get("Text") or "").strip()
+                if _is_sample_csv_row(trigger, output):
+                    continue
+                if trigger and output:
+                    yield trigger, output
+        return []
+    for row in rows[1:]:
+        if len(row) < 2:
+            continue
+        trigger = row[0].strip()
+        output = row[1].strip()
+        if _is_sample_csv_row(trigger, output):
+            continue
+        if trigger and output:
+            yield trigger, output
+
+def _is_sample_csv_row(trigger: str, output: str) -> bool:
+    if not trigger or not output:
+        return False
+    trigger_upper = trigger.strip().upper()
+    output_upper = output.strip().upper()
+    if trigger_upper.startswith("SAMPLE_"):
+        return True
+    if output_upper.startswith("SAMPLE_"):
+        return True
+    return False
+
 
 def default_log_path() -> Path:
     return DEFAULT_LOG_FILE
