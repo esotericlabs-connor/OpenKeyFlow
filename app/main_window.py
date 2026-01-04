@@ -7,10 +7,9 @@ import sys
 import threading
 import urllib.request
 from pathlib import Path
-from typing import Dict
+from typing import Callable, Dict
 
-import logging 
-import Logger
+from logging import Logger
 
 from PyQt5 import QtCore, QtGui, QtWidgets, QtPrintSupport
 
@@ -1185,8 +1184,14 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         if self.engine.hooks_available():
-            self.engine.add_hotkey("ctrl+f12", self.toggle_enabled)
-            self.engine.add_hotkey("ctrl+f11", self.cycle_profile_hotkey)        
+            self.engine.add_hotkey(
+                "ctrl+f12",
+                lambda: self._run_on_ui_thread(self.toggle_enabled),
+            )
+            self.engine.add_hotkey(
+                "ctrl+f11",
+                lambda: self._run_on_ui_thread(self.cycle_profile_hotkey),
+            )  
 
         self._was_hidden_to_tray = False
         self.settings_dialog: SettingsDialog | None = None
@@ -1211,6 +1216,16 @@ class MainWindow(QtWidgets.QMainWindow):
         for trigger, output in self.hotkeys.items():
             items = [QtGui.QStandardItem(trigger), QtGui.QStandardItem(output)]
             self.model.appendRow(items)
+
+    def _run_on_ui_thread(self, action: Callable[[], None]) -> None:
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            action()
+            return
+        if QtCore.QThread.currentThread() == app.thread():
+            action()
+        else:
+            QtCore.QTimer.singleShot(0, action)
 
     def refresh_status_ui(self) -> None:
         self.refresh_counters_only()

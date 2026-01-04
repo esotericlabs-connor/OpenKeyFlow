@@ -88,6 +88,8 @@ class PynputBackend(BaseHookBackend):
         self._listener: Optional[pynput_keyboard.Listener] = None
         self._hotkeys: Optional[pynput_keyboard.GlobalHotKeys] = None
         self._listener_lock = threading.Lock()
+        self._hotkey_lock = threading.Lock()
+        self._hotkey_callbacks: dict[str, Callable[[], None]] = {}
 
     def start(self, handler: Callable[[HookEvent], None]) -> None:
         def on_press(key) -> None:
@@ -139,15 +141,24 @@ class PynputBackend(BaseHookBackend):
 
     def add_hotkey(self, hotkey: str, callback: Callable[[], None]) -> None:
         normalized = self._normalize_hotkey(hotkey)
-        if self._hotkeys:
-            self._hotkeys.stop()
-        self._hotkeys = self._keyboard.GlobalHotKeys({normalized: callback})
-        self._hotkeys.start()
+        with self._hotkey_lock:
+            self._hotkey_callbacks[normalized] = callback
+            self._rebuild_hotkeys()
 
     def remove_hotkey(self, hotkey: str) -> None:
+        normalized = self._normalize_hotkey(hotkey)
+        with self._hotkey_lock:
+            self._hotkey_callbacks.pop(normalized, None)
+            self._rebuild_hotkeys()
+
+    def _rebuild_hotkeys(self) -> None:
         if self._hotkeys:
             self._hotkeys.stop()
             self._hotkeys = None
+        if not self._hotkey_callbacks:
+            return
+        self._hotkeys = self._keyboard.GlobalHotKeys(dict(self._hotkey_callbacks))
+        self._hotkeys.start()
 
     @staticmethod
     def _normalize_hotkey(hotkey: str) -> str:
