@@ -53,7 +53,6 @@ def main() -> None:
         hotkeys=hotkeys,
         cooldown=float(config.get("cooldown", 0.3)),
         paste_delay=float(config.get("paste_delay", 0.05)),
-        use_clipboard=bool(config.get("use_clipboard", True)),
     )
 
     window = MainWindow(

@@ -1,6 +1,7 @@
 """Qt application window for OpenKeyFlow."""
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 from typing import Dict
@@ -15,7 +16,7 @@ from backend.logging_utils import configure_logging, get_logger
 from backend.trigger_engine import TriggerEngine
 
 APP_NAME = "OpenKeyFlow"
-
+HOTKEY_CLIPBOARD_PREFIX = "OpenKeyFlowHotkeys:"
 
 class LineNumberArea(QtWidgets.QWidget):
     def __init__(self, editor: "CodeEditor") -> None:
@@ -145,13 +146,13 @@ class HotkeyFilter(QtCore.QSortFilterProxyModel):
         output = (model.data(val_idx, QtCore.Qt.DisplayRole) or "").lower()
         return self.query in trigger or self.query in output
 
-def make_status_icon(enabled: bool) -> QtGui.QIcon:
+def make_status_icon(enabled: bool, *, override_color: QtGui.QColor | None = None) -> QtGui.QIcon:
     icon_size = 64
     pixmap = QtGui.QPixmap(icon_size, icon_size)
     pixmap.fill(QtCore.Qt.transparent)
     painter = QtGui.QPainter(pixmap)
     painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-    color = QtGui.QColor("#2ecc71" if enabled else "#e74c3c")
+    color = override_color or QtGui.QColor("#2ecc71" if enabled else "#e74c3c")
     painter.setBrush(color)
     painter.setPen(QtCore.Qt.NoPen)
     margin = 8
@@ -243,6 +244,12 @@ def set_app_palette(dark: bool) -> None:
                 background-color: #1f1f24;
                 color: #ff7b7b;
                 border: 1px solid #ff8080;
+            }
+            QMessageBox {
+                background-color: #1f2128;
+            }
+            QMessageBox QLabel {
+                color: #ffffff;
             }
             QTabWidget::pane {
                 border: 1px solid #ff8080;
@@ -406,10 +413,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.change_passphrase_btn.clicked.connect(self._on_change_passphrase)
         privacy_layout.addWidget(self.change_passphrase_btn)
 
-        self.clipboard_checkbox = QtWidgets.QCheckBox("Use clipboard for paste (faster, may expose clipboard history)")
-        self.clipboard_checkbox.setChecked(bool(self.window.config.get("use_clipboard", True)))
-        self.clipboard_checkbox.toggled.connect(self._on_clipboard_toggled)
-        privacy_layout.addWidget(self.clipboard_checkbox)
+        self.clipboard_checkbox = None
 
         layout.addWidget(privacy_group)
 
@@ -565,9 +569,6 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def _on_change_passphrase(self) -> None:
         self.window.change_profiles_passphrase()
-
-    def _on_clipboard_toggled(self, checked: bool) -> None:
-        self.window.set_use_clipboard(checked)
 
     def _on_choose_log_path(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Select log file", self.log_path_edit.text(), "Log files (*.log)")
@@ -725,7 +726,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.engine.set_paste_delay(float(self.config.get("paste_delay", 0.05)))
         self.engine.update_hotkeys(self.hotkeys)
         self.engine.set_logger(self.logger)
-        self.engine.set_use_clipboard(bool(self.config.get("use_clipboard", True)))
 
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(760, 480)
@@ -774,12 +774,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.table = QtWidgets.QTableView()
         self.table.setModel(self.proxy)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)
+        self.table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_hotkey_context_menu)
         layout.addWidget(self.table, 1)
+        self.copy_action = QtWidgets.QAction("Copy", self)
+        self.copy_action.setShortcut(QtGui.QKeySequence.Copy)
+        self.copy_action.triggered.connect(self.copy_selected_hotkeys)
+        self.table.addAction(self.copy_action)
+
+        self.paste_action = QtWidgets.QAction("Paste", self)
+        self.paste_action.setShortcut(QtGui.QKeySequence.Paste)
+        self.paste_action.triggered.connect(self.paste_hotkeys)
+        self.table.addAction(self.paste_action)
+
+        self.delete_action = QtWidgets.QAction("Delete", self)
+        self.delete_action.setShortcut(QtGui.QKeySequence.Delete)
+        self.delete_action.triggered.connect(self.delete_selected)
+        self.table.addAction(self.delete_action)
 
         self._apply_table_header_theme()
 
@@ -839,16 +856,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self.counter_timer.start()
         self.tray = QtWidgets.QSystemTrayIcon(self)
         self.tray.setIcon(make_status_icon(self.enabled))
-        tray_menu = QtWidgets.QMenu()
-        tray_menu.addAction("Toggle Enabled", self.toggle_enabled)
-        tray_menu.addAction("Settings", self.open_settings)
-        tray_menu.addSeparator()
-        tray_menu.addAction("Show/Hide", self.toggle_window_visibility)
-        tray_menu.addAction("Quit", self.quit_app)
-        self.tray.setContextMenu(tray_menu)
+
+        self.tray_menu = QtWidgets.QMenu()
+        self.tray_profile_menu = QtWidgets.QMenu("Profiles", self.tray_menu)
+        self.tray_profile_menu.triggered.connect(self._on_tray_profile_triggered)
+        self.tray_menu.addAction("Toggle Enabled", self.toggle_enabled)
+        self.tray_menu.addAction("Settings", self.open_settings)
+        self.tray_menu.addMenu(self.tray_profile_menu)
+        self.tray_menu.addSeparator()
+        self.tray_menu.addAction("Show/Hide", self.toggle_window_visibility)
+        self.tray_menu.addAction("Quit", self.quit_app)
+        self.tray.setContextMenu(self.tray_menu)        
         self.tray.activated.connect(self._tray_activated)
         self.tray.setToolTip(APP_NAME)
         self.tray.show()
+        self._refresh_tray_profile_menu()
+        self._tray_flash_timer = QtCore.QTimer(self)
+        self._tray_flash_timer.setInterval(160)
+        self._tray_flash_timer.timeout.connect(self._toggle_tray_flash_icon)
+        self._tray_flash_icons = (
+            make_status_icon(True, override_color=QtGui.QColor("#2ecc71")),
+            make_status_icon(True, override_color=QtGui.QColor("#f1c40f")),
+        )
+        self._tray_flash_index = 0
+        self._active_fire_count = 0
+
+        self.engine.set_fire_hooks(
+            on_start=self._notify_fire_start,
+            on_end=self._notify_fire_end,
+        )
 
         if self.engine.hooks_available():
             self.engine.add_hotkey("ctrl+f12", self.toggle_enabled)    
@@ -856,6 +892,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._was_hidden_to_tray = False
         self.settings_dialog: SettingsDialog | None = None
         self._tray_message_shown = False
+
+        app = QtWidgets.QApplication.instance()
+        if app:
+            app.focusChanged.connect(self._on_focus_changed)
+            self.engine.set_app_active(app.activeWindow() is not None)
 
         set_app_palette(self.dark_mode)
         self._apply_table_header_theme()
@@ -880,7 +921,7 @@ class MainWindow(QtWidgets.QMainWindow):
         app = QtWidgets.QApplication.instance()
         if app:
             app.setWindowIcon(status_icon)
-        if self.tray is not None:
+        if self.tray is not None and not self._tray_flash_timer.isActive():
             self.tray.setIcon(status_icon)
 
     def _apply_table_header_theme(self) -> None:
@@ -891,6 +932,140 @@ class MainWindow(QtWidgets.QMainWindow):
             )
         else:
             header.setStyleSheet("")
+
+    def _show_hotkey_context_menu(self, position: QtCore.QPoint) -> None:
+        menu = QtWidgets.QMenu(self)
+        menu.addAction(self.copy_action)
+        menu.addAction(self.paste_action)
+        menu.addSeparator()
+        menu.addAction(self.delete_action)
+        menu.exec_(self.table.viewport().mapToGlobal(position))
+
+    def _selected_hotkeys(self) -> list[tuple[str, str]]:
+        selection = self.table.selectionModel().selectedRows()
+        hotkeys: list[tuple[str, str]] = []
+        for index in selection:
+            source = self.proxy.mapToSource(index)
+            trigger = self.model.item(source.row(), 0).text()
+            output = self.model.item(source.row(), 1).text()
+            hotkeys.append((trigger, output))
+        return hotkeys
+
+    def copy_selected_hotkeys(self) -> None:
+        hotkeys = self._selected_hotkeys()
+        if not hotkeys:
+            return
+        payload = [{"trigger": trigger, "output": output} for trigger, output in hotkeys]
+        clipboard = QtWidgets.QApplication.clipboard()
+        clipboard.setText(f"{HOTKEY_CLIPBOARD_PREFIX}{json.dumps(payload)}")
+
+    def paste_hotkeys(self) -> None:
+        clipboard = QtWidgets.QApplication.clipboard()
+        text = clipboard.text()
+        if not text.startswith(HOTKEY_CLIPBOARD_PREFIX):
+            QtWidgets.QMessageBox.information(
+                self,
+                "Paste Hotkeys",
+                "Clipboard does not contain OpenKeyFlow hotkeys.",
+            )
+            return
+        raw = text[len(HOTKEY_CLIPBOARD_PREFIX) :]
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            QtWidgets.QMessageBox.warning(self, "Paste Hotkeys", "Clipboard data is not valid.")
+            return
+        if not isinstance(payload, list):
+            QtWidgets.QMessageBox.warning(self, "Paste Hotkeys", "Clipboard data is not valid.")
+            return
+
+        incoming: list[tuple[str, str]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            trigger = item.get("trigger")
+            output = item.get("output")
+            if isinstance(trigger, str) and isinstance(output, str):
+                trigger = trigger.strip()
+                if trigger:
+                    incoming.append((trigger, output))
+
+        if not incoming:
+            QtWidgets.QMessageBox.information(self, "Paste Hotkeys", "No hotkeys found to paste.")
+            return
+
+        with self.hotkey_lock:
+            conflicts = [trigger for trigger, _ in incoming if trigger in self.hotkeys]
+
+        overwrite = False
+        if conflicts:
+            response = QtWidgets.QMessageBox.question(
+                self,
+                "Paste Hotkeys",
+                f"{len(conflicts)} hotkeys already exist. Replace them?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No,
+            )
+            overwrite = response == QtWidgets.QMessageBox.Yes
+
+        added = 0
+        replaced = 0
+        with self.hotkey_lock:
+            for trigger, output in incoming:
+                if trigger in self.hotkeys and not overwrite:
+                    continue
+                if trigger in self.hotkeys:
+                    replaced += 1
+                else:
+                    added += 1
+                self.hotkeys[trigger] = output
+
+        if added or replaced:
+            self._save_current_profile()
+            self.engine.update_hotkeys(self.hotkeys)
+            self.populate_model()
+            self.refresh_status_ui()
+            message = f"Added {added} hotkeys."
+            if replaced:
+                message = f"Added {added} hotkeys and replaced {replaced}."
+            QtWidgets.QMessageBox.information(self, "Paste Hotkeys", message)
+        else:
+            QtWidgets.QMessageBox.information(self, "Paste Hotkeys", "No new hotkeys were added.")
+
+    def _notify_fire_start(self) -> None:
+        QtCore.QTimer.singleShot(0, self._start_tray_flash)
+
+    def _notify_fire_end(self) -> None:
+        QtCore.QTimer.singleShot(0, self._stop_tray_flash)
+
+    def _start_tray_flash(self) -> None:
+        self._active_fire_count += 1
+        if self._active_fire_count == 1:
+            self._tray_flash_index = 0
+            self._tray_flash_timer.start()
+            if self.tray is not None:
+                self.tray.setIcon(self._tray_flash_icons[self._tray_flash_index])
+
+    def _stop_tray_flash(self) -> None:
+        if self._active_fire_count == 0:
+            return
+        self._active_fire_count -= 1
+        if self._active_fire_count == 0:
+            self._tray_flash_timer.stop()
+            if self.tray is not None:
+                self.tray.setIcon(make_status_icon(self.enabled))
+
+    def _toggle_tray_flash_icon(self) -> None:
+        if self.tray is None:
+            return
+        self._tray_flash_index = 1 - self._tray_flash_index
+        self.tray.setIcon(self._tray_flash_icons[self._tray_flash_index])
+
+    def _on_focus_changed(self, _old: QtWidgets.QWidget | None, _new: QtWidgets.QWidget | None) -> None:
+        app = QtWidgets.QApplication.instance()
+        if not app:
+            return
+        self.engine.set_app_active(app.activeWindow() is not None)
 
     def set_dark_mode(self, enabled: bool) -> None:
         self.dark_mode = enabled
@@ -1025,11 +1200,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profile_passphrase = new_passphrase
         self.config["profiles_encrypted"] = True
         storage.save_config(self.config)
-
-    def set_use_clipboard(self, enabled: bool) -> None:
-        self.config["use_clipboard"] = bool(enabled)
-        storage.save_config(self.config)
-        self.engine.set_use_clipboard(bool(enabled))
 
     def _prompt_passphrase(self, title: str, prompt: str, *, confirm: bool = False) -> str | None:
         passphrase, ok = QtWidgets.QInputDialog.getText(
@@ -1229,6 +1399,17 @@ class MainWindow(QtWidgets.QMainWindow):
             to_delete.append(trigger)
         if not to_delete:
             return
+        count = len(to_delete)
+        prompt = "Delete this hotkey?" if count == 1 else f"Delete these {count} selected hotkeys?"
+        response = QtWidgets.QMessageBox.question(
+            self,
+            "Delete Hotkeys",
+            prompt,
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if response != QtWidgets.QMessageBox.Yes:
+            return
         with self.hotkey_lock:
             for trigger in to_delete:
                 self.hotkeys.pop(trigger, None)
@@ -1306,6 +1487,25 @@ class MainWindow(QtWidgets.QMainWindow):
         add_action.setData(None)
         self.profile_button.setText(f"Profile: {self.current_profile}")
         self._apply_profile_button_color()
+        self._refresh_tray_profile_menu()
+
+    def _refresh_tray_profile_menu(self) -> None:
+        if not hasattr(self, "tray_profile_menu") or self.tray_profile_menu is None:
+            return
+        self.tray_profile_menu.clear()
+        action_group = QtWidgets.QActionGroup(self.tray_profile_menu)
+        action_group.setExclusive(True)
+        for name in self.profile_names():
+            action = self.tray_profile_menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name == self.current_profile)
+            action.setData(name)
+            action_group.addAction(action)
+            color = self.profile_color(name)
+            if color:
+                action.setIcon(make_color_icon(QtGui.QColor(color)))
+        self.tray_profile_menu.addSeparator()
+        create_action = self.tray_profile_menu.addAction("Create New Profile…")
 
     def _sync_profile_ui(self) -> None:
         self._refresh_profile_menu()
@@ -1319,6 +1519,20 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if data != self.current_profile:
             self.set_current_profile(data)
+
+    def _on_tray_profile_triggered(self, action: QtGui.QAction) -> None:
+        data = action.data()
+        if data == "__create__":
+            self.show_profile_create_from_tray()
+            return
+        if isinstance(data, str) and data != self.current_profile:
+            self.set_current_profile(data)
+
+    def show_profile_create_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self._show_profile_create_inline()
 
     def _show_profile_create_inline(self) -> None:
         self.profile_button.setEnabled(False)

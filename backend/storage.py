@@ -39,7 +39,6 @@ DEFAULT_CONFIG = {
     "log_file": str(DEFAULT_LOG_FILE),
     "profile_colors": {},
     "profiles_encrypted": False,
-    "use_clipboard": True,
 }
 
 DEFAULT_PROFILE_NAME = "main"

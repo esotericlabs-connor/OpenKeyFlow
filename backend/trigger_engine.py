@@ -44,10 +44,12 @@ SHIFTED_SYMBOLS = {
     "\\": "|",
     "`": "~",
 }
-DIRECT_WRITE_INTERVAL = 0.003
 
 def _default_fire_callback(trigger: str, output: str) -> None:
     # Hook for tests – intentionally empty.
+    return
+
+def _default_activity_callback() -> None:
     return
 
 def safe_write(
@@ -56,20 +58,17 @@ def safe_write(
     *,
     paste_delay: float = 0.05,
     logger: Logger | None = None,
-    use_clipboard: bool = True,
 ) -> None:
-    
     """Safely send text to the active window."""
     log = logger or getLogger("openkeyflow")
     normalized = text.replace("\r\n", "\n")
-    if not use_clipboard or pyperclip is None or platform.system() == "Linux":
-        backend.write(normalized, interval=DIRECT_WRITE_INTERVAL)
+    if pyperclip is None:
+        log.warning("Clipboard support is unavailable; unable to paste output.")
         return
     try:
         previous = pyperclip.paste()
     except Exception as exc:
-        log.warning("Clipboard read failed; falling back to direct typing", exc_info=exc)
-        backend.write(normalized, interval=DIRECT_WRITE_INTERVAL)
+        log.warning("Clipboard read failed; unable to paste output.", exc_info=exc)
         return
     try:
         pyperclip.copy(normalized)
@@ -80,8 +79,7 @@ def safe_write(
         backend.send(paste_hotkey)
         time.sleep(paste_delay)
     except Exception as exc:  # pragma: no cover - depends on platform clipboard behavior
-        log.warning("Clipboard paste failed; falling back to direct typing", exc_info=exc)
-        backend.write(normalized, interval=DIRECT_WRITE_INTERVAL)
+        log.warning("Clipboard paste failed; unable to paste output.", exc_info=exc)
     finally:
         try:
             pyperclip.copy(previous)
@@ -97,8 +95,9 @@ class TriggerEngine:
         hotkeys: Dict[str, str] | None = None,
         cooldown: float = 0.3,
         paste_delay: float = 0.05,
-        use_clipboard: bool = True,
         fire_callback: Callable[[str, str], None] = _default_fire_callback,
+        fire_start_callback: Callable[[], None] = _default_activity_callback,
+        fire_end_callback: Callable[[], None] = _default_activity_callback,
         logger: Logger | None = None,
     ) -> None:
         self._hotkeys: Dict[str, str] = hotkeys or {}
@@ -108,12 +107,14 @@ class TriggerEngine:
         self._enabled = True
         self._cooldown = cooldown
         self._paste_delay = paste_delay
-        self._use_clipboard = use_clipboard
         self._fire_callback = fire_callback
+        self._fire_start_callback = fire_start_callback
+        self._fire_end_callback = fire_end_callback
         self._backend: hooks.BaseHookBackend | None = None
         self._backend_error: str | None = None
         self._last_fire = 0.0
         self._suppress_events = False
+        self._app_active = False
         self._shift_active = False
         self._caps_lock = False
         self._lock = threading.RLock()
@@ -170,13 +171,27 @@ class TriggerEngine:
         with self._lock:
             self._paste_delay = max(0.0, paste_delay)
     
-    def set_use_clipboard(self, use_clipboard: bool) -> None:
-        with self._lock:
-            self._use_clipboard = bool(use_clipboard)
-
     def set_logger(self, logger: Logger) -> None:
         with self._lock:
             self._logger = logger
+
+    def set_fire_hooks(
+        self,
+        *,
+        on_start: Callable[[], None] | None = None,
+        on_end: Callable[[], None] | None = None,
+    ) -> None:
+        with self._lock:
+            if on_start is not None:
+                self._fire_start_callback = on_start
+            if on_end is not None:
+                self._fire_end_callback = on_end
+
+    def set_app_active(self, active: bool) -> None:
+        with self._lock:
+            self._app_active = bool(active)
+            if self._app_active:
+                self._buffer = ""
 
     def get_stats(self) -> Dict[str, int]:
         with self._lock:
@@ -236,6 +251,10 @@ class TriggerEngine:
                     if name == "backspace":
                         self._buffer = self._buffer[:-1]
                     return
+                
+                if self._app_active:
+                    self._buffer = ""
+                    return
 
                 if name == "backspace":
                     self._buffer = self._buffer[:-1]
@@ -281,6 +300,10 @@ class TriggerEngine:
     def _fire_locked(self, trigger: str, output: str) -> Tuple[str, str] | None:
         self._suppress_events = True
         try:
+            self._fire_start_callback()
+        except Exception as exc:  # pragma: no cover - UI hooks may fail
+            self._logger.debug("Fire start callback failed", exc_info=exc)
+        try:
             for _ in range(len(trigger)):
                 if self._backend is None:
                     break
@@ -292,7 +315,6 @@ class TriggerEngine:
                 output,
                 self._backend,
                 paste_delay=self._paste_delay,
-                use_clipboard=self._use_clipboard,
                 logger=self._logger,
             )
             self._buffer = ""
@@ -300,6 +322,10 @@ class TriggerEngine:
             return trigger, output
         finally:
             self._suppress_events = False
+            try:
+                self._fire_end_callback()
+            except Exception as exc:  # pragma: no cover - UI hooks may fail
+                self._logger.debug("Fire end callback failed", exc_info=exc)
         return None
 
     def _translate_key(self, name: str) -> str | None:
