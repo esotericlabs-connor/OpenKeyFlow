@@ -1140,6 +1140,25 @@ class SettingsDialog(QtWidgets.QDialog):
     def _on_hotkey_modifier_changed(self, value: str) -> None:
         self.window.set_hotkey_modifier(value.lower())
 
+    def _on_quick_add_hotkey_changed(self) -> None:
+        raw_value = self.quick_add_hotkey_edit.text().strip().lower()
+        if not raw_value:
+            self.quick_add_hotkey_edit.setText(self.window.quick_add_hotkey)
+            return
+        modifier, key = split_hotkey(raw_value)
+        normalized_modifier = normalize_hotkey_modifier(modifier)
+        normalized_key = normalize_hotkey_key(key)
+        if not normalized_key:
+            self.quick_add_hotkey_edit.setText(self.window.quick_add_hotkey)
+            return
+        self.window.set_hotkey_modifier(normalized_modifier)
+        self.window.set_quick_add_key(normalized_key)
+        index = self.hotkey_modifier_combo.findText(normalized_modifier.upper())
+        if index >= 0:
+            self.hotkey_modifier_combo.setCurrentIndex(index)
+        self.quick_add_hotkey_btn.setText(self._display_hotkey_key(normalized_key))
+        self.quick_add_hotkey_edit.setText(self.window.quick_add_hotkey)
+
     def _on_logging_toggled(self, checked: bool) -> None:
         self.window.set_logging_enabled(checked, Path(self.log_path_edit.text()))
         self._update_logging_controls()
