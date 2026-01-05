@@ -21,6 +21,52 @@ from backend.trigger_engine import TriggerEngine
 APP_NAME = "OpenKeyFlow"
 APP_VERSION = "1.0.0"
 HOTKEY_CLIPBOARD_PREFIX = "OpenKeyFlowHotkeys:"
+HOTKEY_MODIFIERS = ("ctrl", "shift", "alt")
+HOTKEY_CONFLICTS = {
+    "windows": {
+        "alt+f4",
+        "alt+tab",
+        "ctrl+alt+del",
+        "ctrl+shift+esc",
+    },
+    "linux": {
+        "alt+f2",
+        "alt+f3",
+        "alt+f4",
+        "alt+f5",
+        "alt+f6",
+        "ctrl+alt+f1",
+        "ctrl+alt+f2",
+        "ctrl+alt+f3",
+        "ctrl+alt+f4",
+        "ctrl+alt+f5",
+        "ctrl+alt+f6",
+        "ctrl+alt+f7",
+        "ctrl+alt+f8",
+        "ctrl+alt+f9",
+        "ctrl+alt+f10",
+        "ctrl+alt+f11",
+        "ctrl+alt+f12",
+    },
+}
+
+def normalize_hotkey_modifier(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in HOTKEY_MODIFIERS:
+        return normalized
+    return "ctrl"
+
+def normalize_hotkey_key(value: str | None) -> str:
+    if value is None:
+        return ""
+    key = str(value).strip().lower().replace(" ", "")
+    return key
+
+def split_hotkey(hotkey: str) -> tuple[str, str]:
+    parts = [part.strip().lower() for part in str(hotkey).split("+") if part.strip()]
+    modifier = next((part for part in parts if part in HOTKEY_MODIFIERS), "ctrl")
+    key = next((part for part in reversed(parts) if part not in HOTKEY_MODIFIERS), "")
+    return modifier, key
 
 class LineNumberArea(QtWidgets.QWidget):
     def __init__(self, editor: "CodeEditor") -> None:
@@ -358,7 +404,10 @@ def readable_text_color(color: QtGui.QColor) -> QtGui.QColor:
     return QtGui.QColor("#1c1c1c" if luminance > 165 else "#ffffff")
 
 def make_logo_pixmap(target_width: int = 220) -> QtGui.QPixmap:
-    logo_path = Path(__file__).resolve().parent.parent / "assets" / "ofk_logo.png"
+    assets_dir = Path(__file__).resolve().parent.parent / "assets"
+    logo_path = assets_dir / "okf_logo.png"
+    if not logo_path.exists():
+        logo_path = assets_dir / "ofk_logo.png"
     pixmap = QtGui.QPixmap(str(logo_path))
     if pixmap.isNull():
         return pixmap
@@ -397,7 +446,7 @@ def compare_versions(current: str, latest: str) -> int:
     return -1
 
 def fetch_latest_version(os_name: str) -> str | None:
-    url = f"https://api.github.com/repos/esoteriklabs-connor/OpenKeyFlow/contents/dist/{os_name}"
+    url = f"https://api.github.com/repos/exoteriklabs/OpenKeyFlow/contents/dist/{os_name}"
     request = urllib.request.Request(url, headers={"User-Agent": "OpenKeyFlow"})
     with urllib.request.urlopen(request, timeout=8) as response:
         payload = json.loads(response.read().decode("utf-8"))
@@ -606,10 +655,17 @@ class QuickAddDialog(QtWidgets.QDialog):
         if parent:
             self.setWindowIcon(make_status_icon(getattr(parent, "enabled", True)))
         self.setModal(True)
-        self.setWindowFlags(self.windowFlags() | QtCore.Qt.Tool)
-
+        self.setWindowFlags(self.windowFlags() | QtCore.Qt.Tool | QtCore.Qt.WindowStaysOnTopHint)
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.card = QtWidgets.QFrame()
+        self.card.setObjectName("quickAddCard")
+        card_layout = QtWidgets.QVBoxLayout(self.card)
+        card_layout.setContentsMargins(18, 18, 18, 18)
+        card_layout.setSpacing(12)
+        layout.addWidget(self.card)
 
         self.header_frame = QtWidgets.QFrame()
         self.header_frame.setObjectName("quickAddHeader")
@@ -625,7 +681,7 @@ class QuickAddDialog(QtWidgets.QDialog):
         self.header_hint.setWordWrap(True)
         header_layout.addWidget(self.header_title)
         header_layout.addWidget(self.header_hint)
-        layout.addWidget(self.header_frame)
+        card_layout.addWidget(self.header_frame)
 
         form_layout = QtWidgets.QFormLayout()
         self.trigger_edit = QtWidgets.QLineEdit()
@@ -637,12 +693,20 @@ class QuickAddDialog(QtWidgets.QDialog):
         self.output_edit.setLineWrapMode(QtWidgets.QPlainTextEdit.WidgetWidth)
         self.output_edit.setMinimumHeight(140)
         form_layout.addRow("Output:", self.output_edit)
-        layout.addLayout(form_layout)
+        card_layout.addLayout(form_layout)
 
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel | QtWidgets.QDialogButtonBox.Ok)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        card_layout.addWidget(buttons)
+
+        shadow = QtWidgets.QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(18)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QtGui.QColor(0, 0, 0, 150))
+        self.card.setGraphicsEffect(shadow)
+
+        self.set_theme(False)
 
     def set_header_color(self, color: QtGui.QColor) -> None:
         text_color = readable_text_color(color)
@@ -653,6 +717,39 @@ class QuickAddDialog(QtWidgets.QDialog):
                 f"color: {text_color.name()};"
                 "border-radius: 8px;"
                 "border: 1px solid rgba(0, 0, 0, 0.2);"
+                "}"
+            )
+        )
+
+    def set_theme(self, dark_mode: bool) -> None:
+        if dark_mode:
+            background = "#1f1f24"
+            field_bg = "#15151a"
+            field_border = "#3a3a44"
+            text_color = "#f5f5f5"
+        else:
+            background = "#f5f6f8"
+            field_bg = "#ffffff"
+            field_border = "#c9c9cf"
+            text_color = "#1c1c1e"
+        self.card.setStyleSheet(
+            (
+                "QFrame#quickAddCard {"
+                f"background-color: {background};"
+                f"color: {text_color};"
+                "border-radius: 12px;"
+                "border: 1px solid rgba(0, 0, 0, 0.12);"
+                "}"
+                "QLineEdit, QPlainTextEdit {"
+                f"background-color: {field_bg};"
+                f"color: {text_color};"
+                f"border: 1px solid {field_border};"
+                "border-radius: 6px;"
+                "padding: 6px;"
+                "}"
+                "QDialogButtonBox QPushButton {"
+                "padding: 6px 14px;"
+                "border-radius: 6px;"
                 "}"
             )
         )
@@ -748,6 +845,22 @@ class SettingsDialog(QtWidgets.QDialog):
             hint.setWordWrap(True)
             general_layout.addWidget(hint)
         general_layout.addWidget(self.dark_mode_checkbox)
+        modifier_row = QtWidgets.QHBoxLayout()
+        modifier_label = QtWidgets.QLabel("Modifier key:")
+        self.hotkey_modifier_combo = QtWidgets.QComboBox()
+        self.hotkey_modifier_combo.addItems(["CTRL", "SHIFT", "ALT"])
+        current_modifier = self.window.hotkey_modifier.upper()
+        index = self.hotkey_modifier_combo.findText(current_modifier)
+        if index >= 0:
+            self.hotkey_modifier_combo.setCurrentIndex(index)
+        self.hotkey_modifier_combo.currentTextChanged.connect(self._on_hotkey_modifier_changed)
+        modifier_row.addWidget(modifier_label)
+        modifier_row.addWidget(self.hotkey_modifier_combo, 1)
+        general_layout.addLayout(modifier_row)
+
+        self.quick_add_hotkey_btn = self._build_hotkey_button(self.window.quick_add_key)
+        quick_add_row = self._build_hotkey_row("Quick Add hotkey:", self.quick_add_hotkey_btn)
+        self.quick_add_hotkey_btn.clicked.connect(lambda: self._begin_listening("quick_add"))
         quick_add_row = QtWidgets.QHBoxLayout()
         quick_add_label = QtWidgets.QLabel("Quick Add hotkey:")
         self.quick_add_hotkey_edit = QtWidgets.QLineEdit(
@@ -757,7 +870,17 @@ class SettingsDialog(QtWidgets.QDialog):
         self.quick_add_hotkey_edit.editingFinished.connect(self._on_quick_add_hotkey_changed)
         quick_add_row.addWidget(quick_add_label)
         quick_add_row.addWidget(self.quick_add_hotkey_edit, 1)
+        
         general_layout.addLayout(quick_add_row)
+        self.profile_switch_hotkey_btn = self._build_hotkey_button(self.window.profile_switch_key)
+        profile_switch_row = self._build_hotkey_row("Profile Switch hotkey:", self.profile_switch_hotkey_btn)
+        self.profile_switch_hotkey_btn.clicked.connect(lambda: self._begin_listening("profile_switch"))
+        general_layout.addLayout(profile_switch_row)
+
+        self.toggle_hotkey_btn = self._build_hotkey_button(self.window.toggle_hotkey_key)
+        toggle_row = self._build_hotkey_row("Toggle OpenKeyFlow hotkey:", self.toggle_hotkey_btn)
+        self.toggle_hotkey_btn.clicked.connect(lambda: self._begin_listening("toggle"))
+        general_layout.addLayout(toggle_row)
         layout.addWidget(general_group)
 
         data_group = QtWidgets.QGroupBox("Data & Import/Export")
@@ -897,6 +1020,9 @@ class SettingsDialog(QtWidgets.QDialog):
             logging_group,
             links_group,
         ]
+        self._listening_target: str | None = None
+        self._listening_button: QtWidgets.QPushButton | None = None
+        self._listening_previous_label: str | None = None
         self._apply_section_title_style()
         self.refresh_profiles()
         self.profile_list.currentItemChanged.connect(self._on_profile_selection_changed)
@@ -911,6 +1037,84 @@ class SettingsDialog(QtWidgets.QDialog):
         encrypted = self.encryption_checkbox.isChecked()
         self.change_passphrase_btn.setEnabled(encrypted)
 
+    def _build_hotkey_button(self, key: str) -> QtWidgets.QPushButton:
+        button = QtWidgets.QPushButton(self._display_hotkey_key(key))
+        button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        button.setMinimumWidth(140)
+        return button
+
+    def _build_hotkey_row(self, label_text: str, button: QtWidgets.QPushButton) -> QtWidgets.QHBoxLayout:
+        row = QtWidgets.QHBoxLayout()
+        label = QtWidgets.QLabel(label_text)
+        row.addWidget(label)
+        row.addStretch(1)
+        row.addWidget(button)
+        return row
+
+    def _display_hotkey_key(self, key: str) -> str:
+        normalized = normalize_hotkey_key(key)
+        if not normalized:
+            return "Unassigned"
+        return normalized.upper()
+
+    def _begin_listening(self, target: str) -> None:
+        if self._listening_button is not None:
+            self._end_listening(apply_change=False)
+        self._listening_target = target
+        if target == "quick_add":
+            self._listening_button = self.quick_add_hotkey_btn
+        elif target == "profile_switch":
+            self._listening_button = self.profile_switch_hotkey_btn
+        elif target == "toggle":
+            self._listening_button = self.toggle_hotkey_btn
+        else:
+            self._listening_button = None
+        if self._listening_button is None:
+            self._listening_target = None
+            return
+        self._listening_previous_label = self._listening_button.text()
+        self._listening_button.setText("Waiting for input")
+        self.grabKeyboard()
+
+    def _end_listening(self, *, apply_change: bool, key_value: str | None = None) -> None:
+        if self._listening_button is None:
+            return
+        self.releaseKeyboard()
+        if apply_change and key_value is not None:
+            self._listening_button.setText(self._display_hotkey_key(key_value))
+        else:
+            if self._listening_previous_label is not None:
+                self._listening_button.setText(self._listening_previous_label)
+        self._listening_target = None
+        self._listening_button = None
+        self._listening_previous_label = None
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802 - Qt override
+        if self._listening_target is None:
+            super().keyPressEvent(event)
+            return
+        key = event.key()
+        if key in (QtCore.Qt.Key_Control, QtCore.Qt.Key_Shift, QtCore.Qt.Key_Alt, QtCore.Qt.Key_Meta):
+            return
+        if key == QtCore.Qt.Key_Escape:
+            self._end_listening(apply_change=False)
+            return
+        key_name = QtGui.QKeySequence(key).toString()
+        key_value = normalize_hotkey_key(key_name or event.text())
+        if not key_value:
+            return
+        if self._listening_target == "quick_add":
+            self.window.set_quick_add_key(key_value)
+        elif self._listening_target == "profile_switch":
+            self.window.set_profile_switch_key(key_value)
+        elif self._listening_target == "toggle":
+            self.window.set_toggle_hotkey_key(key_value)
+        self._end_listening(apply_change=True, key_value=key_value)
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802 - Qt override
+        if self._listening_target is not None:
+            self._end_listening(apply_change=False)
+        super().closeEvent(event)
 
     def _apply_section_title_style(self) -> None:
         if self.window.dark_mode:
@@ -933,10 +1137,8 @@ class SettingsDialog(QtWidgets.QDialog):
     def _on_dark_mode_toggled(self, checked: bool) -> None:
         self.window.set_dark_mode(checked)
 
-    def _on_quick_add_hotkey_changed(self) -> None:
-        hotkey = self.quick_add_hotkey_edit.text().strip().lower()
-        self.quick_add_hotkey_edit.setText(hotkey)
-        self.window.set_quick_add_hotkey(hotkey)
+    def _on_hotkey_modifier_changed(self, value: str) -> None:
+        self.window.set_hotkey_modifier(value.lower())
 
     def _on_logging_toggled(self, checked: bool) -> None:
         self.window.set_logging_enabled(checked, Path(self.log_path_edit.text()))
@@ -1125,7 +1327,37 @@ class MainWindow(QtWidgets.QMainWindow):
         self.logger: Logger = logger or get_logger()
         self.profile_passphrase = profile_passphrase
         self.profiles_encrypted = profiles_encrypted
-        self.quick_add_hotkey = str(self.config.get("quick_add_hotkey", "ctrl+f10")).strip().lower()
+        self.hotkey_modifier = normalize_hotkey_modifier(self.config.get("hotkey_modifier"))
+        self.quick_add_key = normalize_hotkey_key(self.config.get("quick_add_key"))
+        self.profile_switch_key = normalize_hotkey_key(self.config.get("profile_switch_key"))
+        self.toggle_hotkey_key = normalize_hotkey_key(self.config.get("toggle_hotkey_key"))
+        legacy_hotkey = str(self.config.get("quick_add_hotkey", "")).strip().lower()
+        if legacy_hotkey and not self.quick_add_key:
+            legacy_modifier, legacy_key = split_hotkey(legacy_hotkey)
+            self.hotkey_modifier = normalize_hotkey_modifier(legacy_modifier)
+            self.quick_add_key = normalize_hotkey_key(legacy_key)
+        if not self.quick_add_key:
+            self.quick_add_key = "f10"
+        if not self.profile_switch_key:
+            self.profile_switch_key = "f11"
+        if not self.toggle_hotkey_key:
+            self.toggle_hotkey_key = "f12"
+        self.quick_add_hotkey = self._compose_hotkey(self.quick_add_key)
+        self.profile_switch_hotkey = self._compose_hotkey(self.profile_switch_key)
+        self.toggle_hotkey = self._compose_hotkey(self.toggle_hotkey_key)
+        config_updated = False
+        for key, value in (
+            ("hotkey_modifier", self.hotkey_modifier),
+            ("quick_add_key", self.quick_add_key),
+            ("profile_switch_key", self.profile_switch_key),
+            ("toggle_hotkey_key", self.toggle_hotkey_key),
+            ("quick_add_hotkey", self.quick_add_hotkey),
+        ):
+            if self.config.get(key) != value:
+                self.config[key] = value
+                config_updated = True
+        if config_updated:
+            storage.save_config(self.config)
 
         self._allow_close = False
 
@@ -1287,15 +1519,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         if self.engine.hooks_available():
-            self.engine.add_hotkey(
-                "ctrl+f12",
-                lambda: self._run_on_ui_thread(self.toggle_enabled),
-            )
-            self.engine.add_hotkey(
-                "ctrl+f11",
-                lambda: self._run_on_ui_thread(self.cycle_profile_hotkey),
-            )
-            self._register_quick_add_hotkey(self.quick_add_hotkey)  
+            self._register_global_hotkeys()
 
         self._was_hidden_to_tray = False
         self.settings_dialog: SettingsDialog | None = None
@@ -1317,6 +1541,12 @@ class MainWindow(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
     # UI helpers
     # ------------------------------------------------------------------
+    def _compose_hotkey(self, key: str) -> str:
+        normalized_key = normalize_hotkey_key(key)
+        if not normalized_key:
+            return ""
+        return f"{self.hotkey_modifier}+{normalized_key}"
+    
     def populate_model(self) -> None:
         self.model.setRowCount(0)
         for trigger, output in self.hotkeys.items():
@@ -1492,20 +1722,119 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.settings_dialog:
             self.settings_dialog._apply_section_title_style()
 
-    def set_quick_add_hotkey(self, hotkey: str) -> None:
-        normalized = hotkey.strip().lower()
-        previous = str(self.config.get("quick_add_hotkey", "ctrl+f10")).strip().lower()
-        if normalized == previous:
+    def set_hotkey_modifier(self, modifier: str) -> None:
+        normalized = normalize_hotkey_modifier(modifier)
+        if normalized == self.hotkey_modifier:
             return
-        self.config["quick_add_hotkey"] = normalized
+        previous = {
+            "quick_add": self.quick_add_hotkey,
+            "profile_switch": self.profile_switch_hotkey,
+            "toggle": self.toggle_hotkey,
+        }
+        self.hotkey_modifier = normalized
+        self.quick_add_hotkey = self._compose_hotkey(self.quick_add_key)
+        self.profile_switch_hotkey = self._compose_hotkey(self.profile_switch_key)
+        self.toggle_hotkey = self._compose_hotkey(self.toggle_hotkey_key)
+        self._persist_hotkey_settings()
+        self._rebuild_global_hotkeys(previous)
+        self._warn_if_hotkey_conflict(self.quick_add_hotkey, "Quick Add hotkey")
+        self._warn_if_hotkey_conflict(self.profile_switch_hotkey, "Profile Switch hotkey")
+        self._warn_if_hotkey_conflict(self.toggle_hotkey, "Toggle OpenKeyFlow hotkey")
+
+    def set_quick_add_key(self, key: str) -> None:
+        normalized = normalize_hotkey_key(key)
+        if normalized == self.quick_add_key:
+            return
+        previous = {
+            "quick_add": self.quick_add_hotkey,
+            "profile_switch": self.profile_switch_hotkey,
+            "toggle": self.toggle_hotkey,
+        }
+        self.quick_add_key = normalized
+        self.quick_add_hotkey = self._compose_hotkey(self.quick_add_key)
+        self._persist_hotkey_settings()
+        self._rebuild_global_hotkeys(previous)
+        self._warn_if_hotkey_conflict(self.quick_add_hotkey, "Quick Add hotkey")
+
+    def set_profile_switch_key(self, key: str) -> None:
+        normalized = normalize_hotkey_key(key)
+        if normalized == self.profile_switch_key:
+            return
+        previous = {
+            "quick_add": self.quick_add_hotkey,
+            "profile_switch": self.profile_switch_hotkey,
+            "toggle": self.toggle_hotkey,
+        }
+        self.profile_switch_key = normalized
+        self.profile_switch_hotkey = self._compose_hotkey(self.profile_switch_key)
+        self._persist_hotkey_settings()
+        self._rebuild_global_hotkeys(previous)
+        self._warn_if_hotkey_conflict(self.profile_switch_hotkey, "Profile Switch hotkey")
+
+    def set_toggle_hotkey_key(self, key: str) -> None:
+        normalized = normalize_hotkey_key(key)
+        if normalized == self.toggle_hotkey_key:
+            return
+        previous = {
+            "quick_add": self.quick_add_hotkey,
+            "profile_switch": self.profile_switch_hotkey,
+            "toggle": self.toggle_hotkey,
+        }
+        self.toggle_hotkey_key = normalized
+        self.toggle_hotkey = self._compose_hotkey(self.toggle_hotkey_key)
+        self._persist_hotkey_settings()
+        self._rebuild_global_hotkeys(previous)
+        self._warn_if_hotkey_conflict(self.toggle_hotkey, "Toggle OpenKeyFlow hotkey")
+
+    def _persist_hotkey_settings(self) -> None:
+        self.config["hotkey_modifier"] = self.hotkey_modifier
+        self.config["quick_add_key"] = self.quick_add_key
+        self.config["profile_switch_key"] = self.profile_switch_key
+        self.config["toggle_hotkey_key"] = self.toggle_hotkey_key
+        self.config["quick_add_hotkey"] = self.quick_add_hotkey
         storage.save_config(self.config)
-        self.quick_add_hotkey = normalized
+
+        def _rebuild_global_hotkeys(self, previous_hotkeys: Dict[str, str]) -> None:
+            if not self.engine.hooks_available():
+                return
+            for hotkey in previous_hotkeys.values():
+                if hotkey:
+                    self.engine.remove_hotkey(hotkey)
+            self._register_global_hotkeys()
+
+    def _register_global_hotkeys(self) -> None:
         if not self.engine.hooks_available():
             return
-        if previous:
-            self.engine.remove_hotkey(previous)
-        if normalized:
-            self._register_quick_add_hotkey(normalized)
+        if self.toggle_hotkey:
+            self.engine.add_hotkey(
+                self.toggle_hotkey,
+                lambda: self._run_on_ui_thread(self.toggle_enabled),
+            )
+        if self.profile_switch_hotkey:
+            self.engine.add_hotkey(
+                self.profile_switch_hotkey,
+                lambda: self._run_on_ui_thread(self.cycle_profile_hotkey),
+            )
+        if self.quick_add_hotkey:
+            self._register_quick_add_hotkey(self.quick_add_hotkey)
+
+    def _warn_if_hotkey_conflict(self, hotkey: str, action_label: str) -> None:
+        if not hotkey:
+            return
+        try:
+            os_label = self.current_os_label()
+            conflicts = HOTKEY_CONFLICTS.get(os_label, set())
+            if hotkey in conflicts:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Potential Hotkey Conflict",
+                    (
+                        f"{action_label} is set to '{hotkey}', which can conflict with system shortcuts."
+                        " OpenKeyFlow will still use the hotkey, but it may be intercepted by the OS."
+                    ),
+                )
+        except Exception:
+            return
 
     def set_logging_enabled(self, enabled: bool, path: Path | None = None) -> None:
         log_path = Path(path) if path else Path(self.config.get("log_file", storage.default_log_path()))
@@ -1750,8 +2079,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def quit_app(self) -> None:
         try:
-            self.engine.remove_hotkey("ctrl+f12")
-            self.engine.remove_hotkey("ctrl+f11")
+            if self.toggle_hotkey:
+                self.engine.remove_hotkey(self.toggle_hotkey)
+            if self.profile_switch_hotkey:
+                self.engine.remove_hotkey(self.profile_switch_hotkey)
             if self.quick_add_hotkey:
                 self.engine.remove_hotkey(self.quick_add_hotkey)
         except Exception:
@@ -1780,33 +2111,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             trigger, output = dialog.get_data()
             self._add_hotkey(trigger, output)
-
-    def open_quick_add_from_clipboard(self) -> None:
-        clipboard = QtWidgets.QApplication.clipboard()
-        if clipboard is None:
-            self._show_quick_add_toast("Clipboard has no text to add")
-            return
-        mime = clipboard.mimeData()
-        if mime is None or not mime.hasText():
-            self._show_quick_add_toast("Clipboard has no text to add")
-            return
-        text = mime.text()
-        if not text.strip():
-            self._show_quick_add_toast("Clipboard has no text to add")
-            return
-
-        active_modal = QtWidgets.QApplication.activeModalWidget()
-        if active_modal is not None and not isinstance(active_modal, QuickAddDialog):
-            active_modal.raise_()
-            active_modal.activateWindow()
-            return
-
-        self.logger.info("[QUICK_ADD] opened, clipboard_len=%s", len(text))
-        dialog = active_modal if isinstance(active_modal, QuickAddDialog) else self._get_quick_add_dialog()
-        dialog.set_clipboard_text(text)
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
 
     def open_quick_add_from_clipboard(self) -> None:
         clipboard = QtWidgets.QApplication.clipboard()
@@ -2118,6 +2422,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.quick_add_dialog = dialog
         color_hex = self.profile_color(self.current_profile) or "#f1c40f"
         self.quick_add_dialog.set_header_color(QtGui.QColor(color_hex))
+        self.quick_add_dialog.set_theme(self.dark_mode)
         return self.quick_add_dialog
 
     def _on_quick_add_accepted(self) -> None:
