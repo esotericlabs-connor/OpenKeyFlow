@@ -22,6 +22,10 @@ APP_NAME = "OpenKeyFlow"
 APP_VERSION = "1.0.0"
 HOTKEY_CLIPBOARD_PREFIX = "OpenKeyFlowHotkeys:"
 HOTKEY_MODIFIERS = ("ctrl", "shift", "alt")
+DEFAULT_HOTKEY_MODIFIER = "ctrl"
+DEFAULT_QUICK_ADD_KEY = "f10"
+DEFAULT_PROFILE_SWITCH_KEY = "f11"
+DEFAULT_TOGGLE_HOTKEY_KEY = "f12"
 HOTKEY_CONFLICTS = {
     "windows": {
         "alt+f4",
@@ -54,7 +58,8 @@ def normalize_hotkey_modifier(value: str | None) -> str:
     normalized = str(value or "").strip().lower()
     if normalized in HOTKEY_MODIFIERS:
         return normalized
-    return "ctrl"
+    return DEFAULT_HOTKEY_MODIFIER
+
 
 def normalize_hotkey_key(value: str | None) -> str:
     if value is None:
@@ -861,16 +866,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.quick_add_hotkey_btn = self._build_hotkey_button(self.window.quick_add_key)
         quick_add_row = self._build_hotkey_row("Quick Add hotkey:", self.quick_add_hotkey_btn)
         self.quick_add_hotkey_btn.clicked.connect(lambda: self._begin_listening("quick_add"))
-        quick_add_row = QtWidgets.QHBoxLayout()
-        quick_add_label = QtWidgets.QLabel("Quick Add hotkey:")
-        self.quick_add_hotkey_edit = QtWidgets.QLineEdit(
-            str(self.window.config.get("quick_add_hotkey", "ctrl+f10")).strip().lower()
-        )
-        self.quick_add_hotkey_edit.setPlaceholderText("ctrl+f10")
-        self.quick_add_hotkey_edit.editingFinished.connect(self._on_quick_add_hotkey_changed)
-        quick_add_row.addWidget(quick_add_label)
-        quick_add_row.addWidget(self.quick_add_hotkey_edit, 1)
-        
+                
         general_layout.addLayout(quick_add_row)
         self.profile_switch_hotkey_btn = self._build_hotkey_button(self.window.profile_switch_key)
         profile_switch_row = self._build_hotkey_row("Profile Switch hotkey:", self.profile_switch_hotkey_btn)
@@ -881,6 +877,12 @@ class SettingsDialog(QtWidgets.QDialog):
         toggle_row = self._build_hotkey_row("Toggle OpenKeyFlow hotkey:", self.toggle_hotkey_btn)
         self.toggle_hotkey_btn.clicked.connect(lambda: self._begin_listening("toggle"))
         general_layout.addLayout(toggle_row)
+        reset_hotkeys_row = QtWidgets.QHBoxLayout()
+        reset_hotkeys_row.addStretch(1)
+        self.reset_hotkeys_btn = QtWidgets.QPushButton("Reset global hotkeys")
+        self.reset_hotkeys_btn.clicked.connect(self._on_reset_hotkeys)
+        reset_hotkeys_row.addWidget(self.reset_hotkeys_btn)
+        general_layout.addLayout(reset_hotkeys_row)
         layout.addWidget(general_group)
 
         data_group = QtWidgets.QGroupBox("Data & Import/Export")
@@ -1140,24 +1142,16 @@ class SettingsDialog(QtWidgets.QDialog):
     def _on_hotkey_modifier_changed(self, value: str) -> None:
         self.window.set_hotkey_modifier(value.lower())
 
-    def _on_quick_add_hotkey_changed(self) -> None:
-        raw_value = self.quick_add_hotkey_edit.text().strip().lower()
-        if not raw_value:
-            self.quick_add_hotkey_edit.setText(self.window.quick_add_hotkey)
-            return
-        modifier, key = split_hotkey(raw_value)
-        normalized_modifier = normalize_hotkey_modifier(modifier)
-        normalized_key = normalize_hotkey_key(key)
-        if not normalized_key:
-            self.quick_add_hotkey_edit.setText(self.window.quick_add_hotkey)
-            return
-        self.window.set_hotkey_modifier(normalized_modifier)
-        self.window.set_quick_add_key(normalized_key)
-        index = self.hotkey_modifier_combo.findText(normalized_modifier.upper())
+    def _on_reset_hotkeys(self) -> None:
+        self.window.reset_global_hotkeys()
+        self.hotkey_modifier_combo.blockSignals(True)
+        index = self.hotkey_modifier_combo.findText(self.window.hotkey_modifier.upper())
         if index >= 0:
             self.hotkey_modifier_combo.setCurrentIndex(index)
-        self.quick_add_hotkey_btn.setText(self._display_hotkey_key(normalized_key))
-        self.quick_add_hotkey_edit.setText(self.window.quick_add_hotkey)
+        self.hotkey_modifier_combo.blockSignals(False)
+        self.quick_add_hotkey_btn.setText(self._display_hotkey_key(self.window.quick_add_key))
+        self.profile_switch_hotkey_btn.setText(self._display_hotkey_key(self.window.profile_switch_key))
+        self.toggle_hotkey_btn.setText(self._display_hotkey_key(self.window.toggle_hotkey_key))
 
     def _on_logging_toggled(self, checked: bool) -> None:
         self.window.set_logging_enabled(checked, Path(self.log_path_edit.text()))
@@ -1356,11 +1350,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.hotkey_modifier = normalize_hotkey_modifier(legacy_modifier)
             self.quick_add_key = normalize_hotkey_key(legacy_key)
         if not self.quick_add_key:
-            self.quick_add_key = "f10"
+            self.quick_add_key = DEFAULT_QUICK_ADD_KEY
         if not self.profile_switch_key:
-            self.profile_switch_key = "f11"
+            self.profile_switch_key = DEFAULT_PROFILE_SWITCH_KEY
         if not self.toggle_hotkey_key:
-            self.toggle_hotkey_key = "f12"
+            self.toggle_hotkey_key = DEFAULT_TOGGLE_HOTKEY_KEY
         self.quick_add_hotkey = self._compose_hotkey(self.quick_add_key)
         self.profile_switch_hotkey = self._compose_hotkey(self.profile_switch_key)
         self.toggle_hotkey = self._compose_hotkey(self.toggle_hotkey_key)
@@ -1813,13 +1807,32 @@ class MainWindow(QtWidgets.QMainWindow):
         self.config["quick_add_hotkey"] = self.quick_add_hotkey
         storage.save_config(self.config)
 
-        def _rebuild_global_hotkeys(self, previous_hotkeys: Dict[str, str]) -> None:
-            if not self.engine.hooks_available():
-                return
-            for hotkey in previous_hotkeys.values():
-                if hotkey:
-                    self.engine.remove_hotkey(hotkey)
-            self._register_global_hotkeys()
+    def _rebuild_global_hotkeys(self, previous_hotkeys: Dict[str, str]) -> None:
+        if not self.engine.hooks_available():
+            return
+        for hotkey in previous_hotkeys.values():
+            if hotkey:
+                self.engine.remove_hotkey(hotkey)
+        self._register_global_hotkeys()
+
+    def reset_global_hotkeys(self) -> None:
+        previous = {
+            "quick_add": self.quick_add_hotkey,
+            "profile_switch": self.profile_switch_hotkey,
+            "toggle": self.toggle_hotkey,
+        }
+        self.hotkey_modifier = DEFAULT_HOTKEY_MODIFIER
+        self.quick_add_key = DEFAULT_QUICK_ADD_KEY
+        self.profile_switch_key = DEFAULT_PROFILE_SWITCH_KEY
+        self.toggle_hotkey_key = DEFAULT_TOGGLE_HOTKEY_KEY
+        self.quick_add_hotkey = self._compose_hotkey(self.quick_add_key)
+        self.profile_switch_hotkey = self._compose_hotkey(self.profile_switch_key)
+        self.toggle_hotkey = self._compose_hotkey(self.toggle_hotkey_key)
+        self._persist_hotkey_settings()
+        self._rebuild_global_hotkeys(previous)
+        self._warn_if_hotkey_conflict(self.quick_add_hotkey, "Quick Add hotkey")
+        self._warn_if_hotkey_conflict(self.profile_switch_hotkey, "Profile Switch hotkey")
+        self._warn_if_hotkey_conflict(self.toggle_hotkey, "Toggle OpenKeyFlow hotkey")
 
     def _register_global_hotkeys(self) -> None:
         if not self.engine.hooks_available():
