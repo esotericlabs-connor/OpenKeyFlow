@@ -1,14 +1,11 @@
-<<<<<<< HEAD
 # <img width="600" height="152" alt="image" src=assets\okf_logo_dark.png>
 
 **Free, secure and open-source text expander for Windows, MacOS, and Linux.**
 
 <img width="500" height="322" alt="image" src="https://github.com/user-attachments/assets/0b5b2e0f-1b6f-47dd-9609-ff809f0ba85c" />
-=======
 # OpenKeyFlow
 **Free, secure and open-source text expander for Windows, MacOS, and Linux**
 <img width="500" height="322" alt="image" src="https://github.com/user-attachments/assets/f43666e5-b156-4454-a1ea-162294de6097" />
->>>>>>> 750054df96cc8b39ba04f232d5362ec6d3230f99
 ![Untitled video](https://github.com/user-attachments/assets/b29ec144-9a06-439b-bb69-61751eb96a90)
 ![Untitled video (1)](https://github.com/user-attachments/assets/b2a31e96-b284-47a7-9fc5-5bd6b69123c1)
 <img width="500" height="322" alt="image" src="https://github.com/user-attachments/assets/f32f29e0-6941-4bfb-8e82-7098c8b7a68d" />
@@ -19,7 +16,6 @@ OpenKeyFlow is a free, open source text expander (or text snippet) app — ideal
 VERSION 1.0 OUT NOW
 
 Download for Windows (v1.0) here:
-
 
 Windows SHA256 Hash (OpenKeyFlow-v1.0.0-exe.zip):
 D285C00096AC355C4C81D357D5CB578BE7F044C562270241B326C0D144427AA0

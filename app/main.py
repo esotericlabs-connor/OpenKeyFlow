@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from PyQt5 import QtCore, QtWidgets
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from backend import storage
 from backend.trigger_engine import TriggerEngine
-from .main_window import APP_NAME, MainWindow
+from app.main_window import APP_NAME, MainWindow
 
 
 def main() -> None:
