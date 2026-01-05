@@ -15,6 +15,7 @@ from logging import Logger
 
 from PyQt5 import QtCore, QtGui, QtWidgets, QtPrintSupport
 
+from app.resources import resource_path
 from backend import autostart
 from backend import storage
 from backend.logging_utils import configure_logging, get_logger
@@ -423,7 +424,7 @@ def readable_text_color(color: QtGui.QColor) -> QtGui.QColor:
     return QtGui.QColor("#1c1c1c" if luminance > 165 else "#ffffff")
 
 def make_logo_pixmap(dark_mode: bool, target_width: int = 220) -> QtGui.QPixmap:
-    assets_dir = Path(__file__).resolve().parent.parent / "assets"
+    assets_dir = resource_path("assets")
     preferred_name = "okf_logo_dark.png" if dark_mode else "okf_logo_light.png"
     logo_path = assets_dir / preferred_name
     if not logo_path.exists():

@@ -35,6 +35,7 @@ build/
 dist/
 *.manifest
 *.spec
+!OpenKeyFlow.spec
 
 # Logs
 *.log
