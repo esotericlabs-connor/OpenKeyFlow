@@ -3,6 +3,8 @@
 from pathlib import Path
 import tomllib
 
+from PyInstaller.utils.hooks import collect_submodules
+
 block_cipher = None
 
 root_dir = Path(__file__).resolve().parent
@@ -22,10 +24,10 @@ for asset in asset_entries:
 
 a = Analysis(
     ["OpenKeyFlow.pyw"],
-    pathex=[],
+    pathex=[str(root_dir)],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=collect_submodules("openkeyflow"),
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
