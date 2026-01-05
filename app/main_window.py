@@ -846,16 +846,19 @@ class SettingsDialog(QtWidgets.QDialog):
         header_layout.addStretch(1)
 
         updates_container = QtWidgets.QWidget()
-        updates_container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        updates_container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         updates_layout = QtWidgets.QVBoxLayout(updates_container)
         updates_layout.setContentsMargins(0, 0, 0, 0)
+        updates_layout.setSpacing(4)
         self.update_btn = QtWidgets.QPushButton("Check for updates")
         self.update_btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        self.update_btn.setMinimumHeight(26)
         self.update_btn.clicked.connect(self._on_check_updates)
         updates_layout.addWidget(self.update_btn)
         self.update_status_label = QtWidgets.QLabel("Update status: not checked.")
         self.update_status_label.setWordWrap(True)
         self.update_status_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        self.update_status_label.setMinimumHeight(18)
         updates_layout.addWidget(self.update_status_label)
         header_layout.addWidget(updates_container, 1, QtCore.Qt.AlignRight)
         layout.addLayout(header_layout)
@@ -922,7 +925,7 @@ class SettingsDialog(QtWidgets.QDialog):
         right_column.setSpacing(12)
 
         general_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        left_column.addWidget(general_group, 1)
+        left_column.addWidget(general_group, 3)
 
         data_group = QtWidgets.QGroupBox("Data & Import/Export")
         data_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
@@ -938,7 +941,7 @@ class SettingsDialog(QtWidgets.QDialog):
         data_layout.addWidget(import_btn)
         data_layout.addWidget(export_btn)
         data_layout.addWidget(export_sample_btn)
-        left_column.addWidget(data_group, 1)
+        left_column.addWidget(data_group, 2)
 
         privacy_group = QtWidgets.QGroupBox("Privacy & Security")
         privacy_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
@@ -961,14 +964,14 @@ class SettingsDialog(QtWidgets.QDialog):
 
         self.clipboard_checkbox = None
 
-        left_column.addWidget(privacy_group, 1)
+        left_column.addWidget(privacy_group, 2)
 
         profiles_group = QtWidgets.QGroupBox("Profiles")
         profiles_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         profiles_layout = QtWidgets.QVBoxLayout(profiles_group)
         self.profile_list = QtWidgets.QListWidget()
         self.profile_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self.profile_list.setMaximumHeight(160)
+        self.profile_list.setMinimumHeight(120)
         self.profile_list.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         profiles_layout.addWidget(self.profile_list)
 
@@ -1006,12 +1009,12 @@ class SettingsDialog(QtWidgets.QDialog):
         profile_color_row.addStretch(1)
         profiles_layout.addLayout(profile_color_row)
 
-        right_column.addWidget(profiles_group, 1)
+        right_column.addWidget(profiles_group, 3)
 
         logging_group = QtWidgets.QGroupBox("Diagnostics")
         logging_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         logging_layout = QtWidgets.QGridLayout(logging_group)
-        right_column.addWidget(logging_group, 1)
+        right_column.addWidget(logging_group, 2)
         self.logging_checkbox = QtWidgets.QCheckBox("Enable debug logging")
         self.logging_checkbox.setChecked(bool(self.window.config.get("logging_enabled", False)))
         self.logging_checkbox.toggled.connect(self._on_logging_toggled)
@@ -1182,10 +1185,53 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def _apply_modifier_combo_theme(self) -> None:
         if self.window.dark_mode:
-            combo_style = "QComboBox, QComboBox QAbstractItemView { color: #000000; }"
+            combo_style = (
+                "QComboBox {"
+                "background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1,"
+                "stop:0 #2c2f3b, stop:1 #ff4d4f);"
+                "color: white;"
+                "border: 1px solid #ff8080;"
+                "border-radius: 4px;"
+                "padding: 2px 24px 2px 8px;"
+                "}"
+                "QComboBox::drop-down {"
+                "subcontrol-origin: padding;"
+                "subcontrol-position: top right;"
+                "width: 20px;"
+                "border-left: 1px solid #ff8080;"
+                "}"
+                "QComboBox QAbstractItemView {"
+                "background-color: #1f2128;"
+                "color: #ffffff;"
+                "selection-background-color: #ff5f6d;"
+                "selection-color: #1c1c1c;"
+                "}"
+            )
         else:
-            combo_style = ""
+            combo_style = (
+                "QComboBox {"
+                "background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1,"
+                "stop:0 #ff7b7b, stop:1 #ff4d4f);"
+                "color: white;"
+                "border: 1px solid #e45b5b;"
+                "border-radius: 4px;"
+                "padding: 2px 24px 2px 8px;"
+                "}"
+                "QComboBox::drop-down {"
+                "subcontrol-origin: padding;"
+                "subcontrol-position: top right;"
+                "width: 20px;"
+                "border-left: 1px solid #e45b5b;"
+                "}"
+                "QComboBox QAbstractItemView {"
+                "background-color: #ffffff;"
+                "color: #222222;"
+                "selection-background-color: #ff7b7b;"
+                "selection-color: #ffffff;"
+                "}"
+            )
         self.hotkey_modifier_combo.setStyleSheet(combo_style)
+        self.hotkey_modifier_combo.setMinimumHeight(26)
 
     def _refresh_logo(self) -> None:
         logo_pixmap = make_logo_pixmap(self.window.dark_mode)
