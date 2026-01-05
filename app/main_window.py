@@ -590,7 +590,30 @@ def set_app_palette(dark: bool) -> None:
         palette.setColor(QtGui.QPalette.Highlight, highlight_color)
         palette.setColor(QtGui.QPalette.HighlightedText, QtCore.Qt.white)
         app.setPalette(palette)
-        app.setStyleSheet("")
+        app.setStyleSheet(
+            """
+            QPushButton, QToolButton {
+                background-color: #ff5f6d;
+                color: #ffffff;
+                border: 1px solid #e45b5b;
+                border-radius: 4px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover, QToolButton:hover {
+                background-color: #ff7b7b;
+                color: #ffffff;
+            }
+            QPushButton:pressed, QToolButton:pressed {
+                background-color: #ff4d4f;
+                color: #ffffff;
+            }
+            QPushButton:disabled, QToolButton:disabled {
+                background-color: #d9d9d9;
+                color: #7a7a7a;
+                border: 1px solid #c7c7c7;
+            }
+            """
+        )
 
 def toggle_autostart(parent: QtWidgets.QWidget) -> None:
     enabled, error = autostart.status()
@@ -851,8 +874,9 @@ class SettingsDialog(QtWidgets.QDialog):
         updates_layout.setContentsMargins(0, 0, 0, 0)
         updates_layout.setSpacing(4)
         self.update_btn = QtWidgets.QPushButton("Check for updates")
-        self.update_btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        self.update_btn.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         self.update_btn.setMinimumHeight(26)
+        self.update_btn.setFixedWidth(self.update_btn.sizeHint().width())
         self.update_btn.clicked.connect(self._on_check_updates)
         updates_layout.addWidget(self.update_btn)
         self.update_status_label = QtWidgets.QLabel("Update status: not checked.")
@@ -1002,6 +1026,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.profile_color_btn.setText("Choose color")
         self.profile_color_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.profile_color_btn.setMenu(self._build_profile_color_menu())
+        self.profile_color_btn.setMinimumWidth(110)
+        self.profile_color_btn.setMinimumHeight(28)
 
         profile_color_row.addWidget(self.profile_color_label)
         profile_color_row.addWidget(self.profile_color_preview)
@@ -1151,21 +1177,27 @@ class SettingsDialog(QtWidgets.QDialog):
             return
         key = event.key()
         if key in (QtCore.Qt.Key_Control, QtCore.Qt.Key_Shift, QtCore.Qt.Key_Alt, QtCore.Qt.Key_Meta):
+            event.accept()
             return
         if key == QtCore.Qt.Key_Escape:
             self._end_listening(apply_change=False)
+            event.accept()
             return
         key_name = QtGui.QKeySequence(key).toString()
         key_value = normalize_hotkey_key(key_name or event.text())
         if not key_value:
             return
+        applied = False
         if self._listening_target == "quick_add":
-            self.window.set_quick_add_key(key_value)
+            applied = self.window.set_quick_add_key(key_value)
         elif self._listening_target == "profile_switch":
-            self.window.set_profile_switch_key(key_value)
+            applied = self.window.set_profile_switch_key(key_value)
         elif self._listening_target == "toggle":
-            self.window.set_toggle_hotkey_key(key_value)
-        self._end_listening(apply_change=True, key_value=key_value)
+            applied = self.window.set_toggle_hotkey_key(key_value)
+        if applied:
+            self._end_listening(apply_change=True, key_value=key_value)
+        else:
+            self._end_listening(apply_change=False)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802 - Qt override
         if self._listening_target is not None:
@@ -1192,7 +1224,8 @@ class SettingsDialog(QtWidgets.QDialog):
                 "color: white;"
                 "border: 1px solid #ff8080;"
                 "border-radius: 4px;"
-                "padding: 2px 24px 2px 8px;"
+                "padding: 2px 24px;"
+                "qproperty-alignment: AlignCenter;"
                 "}"
                 "QComboBox::drop-down {"
                 "subcontrol-origin: padding;"
@@ -1210,24 +1243,24 @@ class SettingsDialog(QtWidgets.QDialog):
         else:
             combo_style = (
                 "QComboBox {"
-                "background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1,"
-                "stop:0 #ff7b7b, stop:1 #ff4d4f);"
-                "color: white;"
-                "border: 1px solid #e45b5b;"
+                "background-color: #ffffff;"
+                "color: #222222;"
+                "border: 1px solid #c7c7c7;"
                 "border-radius: 4px;"
-                "padding: 2px 24px 2px 8px;"
+                "padding: 2px 24px;"
+                "qproperty-alignment: AlignCenter;"
                 "}"
                 "QComboBox::drop-down {"
                 "subcontrol-origin: padding;"
                 "subcontrol-position: top right;"
                 "width: 20px;"
-                "border-left: 1px solid #e45b5b;"
+                "border-left: 1px solid #c7c7c7;"
                 "}"
                 "QComboBox QAbstractItemView {"
                 "background-color: #ffffff;"
                 "color: #222222;"
-                "selection-background-color: #ff7b7b;"
-                "selection-color: #ffffff;"
+                "selection-background-color: #e6e6e6;"
+                "selection-color: #222222;"
                 "}"
             )
         self.hotkey_modifier_combo.setStyleSheet(combo_style)
@@ -1256,7 +1289,13 @@ class SettingsDialog(QtWidgets.QDialog):
         self.window.set_dark_mode(checked)
 
     def _on_hotkey_modifier_changed(self, value: str) -> None:
-        self.window.set_hotkey_modifier(value.lower())
+        if self.window.set_hotkey_modifier(value.lower()):
+            return
+        self.hotkey_modifier_combo.blockSignals(True)
+        index = self.hotkey_modifier_combo.findText(self.window.hotkey_modifier.upper())
+        if index >= 0:
+            self.hotkey_modifier_combo.setCurrentIndex(index)
+        self.hotkey_modifier_combo.blockSignals(False)
 
     def _on_reset_hotkeys(self) -> None:
         self.window.reset_global_hotkeys()
@@ -1859,10 +1898,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.settings_dialog._apply_section_title_style()
             self.settings_dialog._apply_theme_assets()
 
-    def set_hotkey_modifier(self, modifier: str) -> None:
+    def set_hotkey_modifier(self, modifier: str) -> bool:
         normalized = normalize_hotkey_modifier(modifier)
         if normalized == self.hotkey_modifier:
-            return
+            return True
+        proposed_quick_add = f"{normalized}+{self.quick_add_key}" if self.quick_add_key else ""
+        proposed_profile_switch = f"{normalized}+{self.profile_switch_key}" if self.profile_switch_key else ""
+        proposed_toggle = f"{normalized}+{self.toggle_hotkey_key}" if self.toggle_hotkey_key else ""
+        if self._warn_if_global_hotkey_overlap(
+            proposed_quick_add,
+            proposed_profile_switch,
+            proposed_toggle,
+        ):
+            return False
         previous = {
             "quick_add": self.quick_add_hotkey,
             "profile_switch": self.profile_switch_hotkey,
@@ -1877,11 +1925,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._warn_if_hotkey_conflict(self.quick_add_hotkey, "Quick Add hotkey")
         self._warn_if_hotkey_conflict(self.profile_switch_hotkey, "Profile Switch hotkey")
         self._warn_if_hotkey_conflict(self.toggle_hotkey, "Toggle OpenKeyFlow hotkey")
+        return True
 
-    def set_quick_add_key(self, key: str) -> None:
+    def set_quick_add_key(self, key: str) -> bool:
         normalized = normalize_hotkey_key(key)
         if normalized == self.quick_add_key:
-            return
+            return True
+        proposed_hotkey = self._compose_hotkey(normalized)
+        if self._warn_if_global_hotkey_overlap(
+            proposed_hotkey,
+            self.profile_switch_hotkey,
+            self.toggle_hotkey,
+        ):
+            return False
         previous = {
             "quick_add": self.quick_add_hotkey,
             "profile_switch": self.profile_switch_hotkey,
@@ -1892,11 +1948,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persist_hotkey_settings()
         self._rebuild_global_hotkeys(previous)
         self._warn_if_hotkey_conflict(self.quick_add_hotkey, "Quick Add hotkey")
+        return True
 
-    def set_profile_switch_key(self, key: str) -> None:
+    def set_profile_switch_key(self, key: str) -> bool:
         normalized = normalize_hotkey_key(key)
         if normalized == self.profile_switch_key:
-            return
+            return True
+        proposed_hotkey = self._compose_hotkey(normalized)
+        if self._warn_if_global_hotkey_overlap(
+            self.quick_add_hotkey,
+            proposed_hotkey,
+            self.toggle_hotkey,
+        ):
+            return False
         previous = {
             "quick_add": self.quick_add_hotkey,
             "profile_switch": self.profile_switch_hotkey,
@@ -1907,11 +1971,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persist_hotkey_settings()
         self._rebuild_global_hotkeys(previous)
         self._warn_if_hotkey_conflict(self.profile_switch_hotkey, "Profile Switch hotkey")
+        return True
 
-    def set_toggle_hotkey_key(self, key: str) -> None:
+    def set_toggle_hotkey_key(self, key: str) -> bool:
         normalized = normalize_hotkey_key(key)
         if normalized == self.toggle_hotkey_key:
-            return
+            return True
+        proposed_hotkey = self._compose_hotkey(normalized)
+        if self._warn_if_global_hotkey_overlap(
+            self.quick_add_hotkey,
+            self.profile_switch_hotkey,
+            proposed_hotkey,
+        ):
+            return False
         previous = {
             "quick_add": self.quick_add_hotkey,
             "profile_switch": self.profile_switch_hotkey,
@@ -1922,6 +1994,33 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persist_hotkey_settings()
         self._rebuild_global_hotkeys(previous)
         self._warn_if_hotkey_conflict(self.toggle_hotkey, "Toggle OpenKeyFlow hotkey")
+        return True
+
+    def _warn_if_global_hotkey_overlap(
+        self,
+        quick_add_hotkey: str,
+        profile_switch_hotkey: str,
+        toggle_hotkey: str,
+    ) -> bool:
+        labeled = {
+            "Quick Add hotkey": quick_add_hotkey,
+            "Profile Switch hotkey": profile_switch_hotkey,
+            "Toggle OpenKeyFlow hotkey": toggle_hotkey,
+        }
+        seen: dict[str, str] = {}
+        for label, hotkey in labeled.items():
+            if not hotkey:
+                continue
+            existing = seen.get(hotkey)
+            if existing:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Duplicate Global Hotkey",
+                    f"'{hotkey}' is already assigned to {existing}. Please choose a different key.",
+                )
+                return True
+            seen[hotkey] = label
+        return False
 
     def _persist_hotkey_settings(self) -> None:
         self.config["hotkey_modifier"] = self.hotkey_modifier

@@ -74,7 +74,10 @@ class KeyboardBackend(BaseHookBackend):
         self._keyboard.add_hotkey(hotkey, callback)
 
     def remove_hotkey(self, hotkey: str) -> None:
-        self._keyboard.remove_hotkey(hotkey)
+        try:
+            self._keyboard.remove_hotkey(hotkey)
+        except KeyError:
+            return
 
 
 class PynputBackend(BaseHookBackend):
