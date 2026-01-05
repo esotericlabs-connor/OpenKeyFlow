@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=69.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openkeyflow"
+version = "1.0.0"
+description = "A lightweight, privacy-first hotkey automation tool."
+readme = "README.md"
+requires-python = ">=3.12"
+
+license = { text = "GPL-3.0-or-later" }
+
+authors = [
+  { name = "Connor", email = "you@example.com" }
+]
+
+keywords = [
+  "hotkeys",
+  "automation",
+  "desktop",
+  "productivity",
+  "privacy"
+]
+
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3.12"
+]
+
+dependencies = [
+  # leave empty if you use requirements.txt
+]
+
+[project.urls]
+Homepage = "https://github.com/exoteriklabs/openkeyflow"
+Repository = "https://github.com/exoteriklabs/openkeyflow"
+Issues = "https://github.com/exoteriklabs/openkeyflow/issues"
+
+# --- Tooling configuration (non-invasive) ---
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
