@@ -408,9 +408,12 @@ def readable_text_color(color: QtGui.QColor) -> QtGui.QColor:
     luminance = (0.299 * color.red()) + (0.587 * color.green()) + (0.114 * color.blue())
     return QtGui.QColor("#1c1c1c" if luminance > 165 else "#ffffff")
 
-def make_logo_pixmap(target_width: int = 220) -> QtGui.QPixmap:
+def make_logo_pixmap(dark_mode: bool, target_width: int = 220) -> QtGui.QPixmap:
     assets_dir = Path(__file__).resolve().parent.parent / "assets"
-    logo_path = assets_dir / "okf_logo.png"
+    preferred_name = "okf_logo.png" if dark_mode else "okf_logo_light.png"
+    logo_path = assets_dir / preferred_name
+    if not logo_path.exists():
+        logo_path = assets_dir / "okf_logo.png"
     if not logo_path.exists():
         logo_path = assets_dir / "ofk_logo.png"
     pixmap = QtGui.QPixmap(str(logo_path))
@@ -491,8 +494,8 @@ def set_app_palette(dark: bool) -> None:
     if not app:
         return
 
-    palette = QtGui.QPalette()
     if dark:
+        palette = QtGui.QPalette()
         palette.setColor(QtGui.QPalette.Window, QtGui.QColor(22, 24, 30))
         palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
         palette.setColor(QtGui.QPalette.Base, QtGui.QColor(30, 32, 40))
@@ -568,6 +571,10 @@ def set_app_palette(dark: bool) -> None:
             """
         )
     else:
+        palette = QtWidgets.QApplication.style().standardPalette()
+        highlight_color = QtGui.QColor(255, 95, 109)
+        palette.setColor(QtGui.QPalette.Highlight, highlight_color)
+        palette.setColor(QtGui.QPalette.HighlightedText, QtCore.Qt.white)
         app.setPalette(palette)
         app.setStyleSheet("")
 
@@ -812,7 +819,7 @@ class SettingsDialog(QtWidgets.QDialog):
 
         header_layout = QtWidgets.QHBoxLayout()
         self.logo_label = QtWidgets.QLabel()
-        logo_pixmap = make_logo_pixmap()
+        logo_pixmap = make_logo_pixmap(self.window.dark_mode)
         self.logo_label.setPixmap(logo_pixmap)
         self.logo_label.setScaledContents(False)
         self.logo_label.setFixedSize(logo_pixmap.size())
@@ -859,6 +866,7 @@ class SettingsDialog(QtWidgets.QDialog):
         if index >= 0:
             self.hotkey_modifier_combo.setCurrentIndex(index)
         self.hotkey_modifier_combo.currentTextChanged.connect(self._on_hotkey_modifier_changed)
+        self._apply_modifier_combo_theme()
         modifier_row.addWidget(modifier_label)
         modifier_row.addWidget(self.hotkey_modifier_combo, 1)
         general_layout.addLayout(modifier_row)
@@ -883,7 +891,13 @@ class SettingsDialog(QtWidgets.QDialog):
         self.reset_hotkeys_btn.clicked.connect(self._on_reset_hotkeys)
         reset_hotkeys_row.addWidget(self.reset_hotkeys_btn)
         general_layout.addLayout(reset_hotkeys_row)
-        layout.addWidget(general_group)
+        content_layout = QtWidgets.QHBoxLayout()
+        left_column = QtWidgets.QVBoxLayout()
+        right_column = QtWidgets.QVBoxLayout()
+        left_column.setSpacing(12)
+        right_column.setSpacing(12)
+
+        left_column.addWidget(general_group)
 
         data_group = QtWidgets.QGroupBox("Data & Import/Export")
         data_layout = QtWidgets.QHBoxLayout(data_group)
@@ -896,7 +910,7 @@ class SettingsDialog(QtWidgets.QDialog):
         data_layout.addWidget(import_btn)
         data_layout.addWidget(export_btn)
         data_layout.addWidget(export_sample_btn)
-        layout.addWidget(data_group)
+        left_column.addWidget(data_group)
 
         privacy_group = QtWidgets.QGroupBox("Privacy & Security")
         privacy_layout = QtWidgets.QVBoxLayout(privacy_group)
@@ -918,7 +932,7 @@ class SettingsDialog(QtWidgets.QDialog):
 
         self.clipboard_checkbox = None
 
-        layout.addWidget(privacy_group)
+        left_column.addWidget(privacy_group)
 
         profiles_group = QtWidgets.QGroupBox("Profiles")
         profiles_layout = QtWidgets.QVBoxLayout(profiles_group)
@@ -962,7 +976,7 @@ class SettingsDialog(QtWidgets.QDialog):
         profile_color_row.addStretch(1)
         profiles_layout.addLayout(profile_color_row)
 
-        layout.addWidget(profiles_group)
+        right_column.addWidget(profiles_group)
 
         logging_group = QtWidgets.QGroupBox("Diagnostics")
         logging_layout = QtWidgets.QGridLayout(logging_group)
@@ -978,7 +992,7 @@ class SettingsDialog(QtWidgets.QDialog):
         logging_layout.addWidget(QtWidgets.QLabel("Log file:"), 1, 0)
         logging_layout.addWidget(self.log_path_edit, 1, 1)
         logging_layout.addWidget(self.browse_btn, 1, 2)
-        layout.addWidget(logging_group)
+        right_column.addWidget(logging_group)
 
         links_group = QtWidgets.QGroupBox("Links")
         links_layout = QtWidgets.QHBoxLayout(links_group)
@@ -1002,7 +1016,13 @@ class SettingsDialog(QtWidgets.QDialog):
         links_layout.addWidget(donate_btn)
         links_layout.addWidget(github_btn)
         links_layout.addWidget(help_btn)
-        layout.addWidget(links_group)
+        right_column.addWidget(links_group)
+
+        left_column.addStretch(1)
+        right_column.addStretch(1)
+        content_layout.addLayout(left_column, 1)
+        content_layout.addLayout(right_column, 1)
+        layout.addLayout(content_layout)
 
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)
@@ -1128,6 +1148,24 @@ class SettingsDialog(QtWidgets.QDialog):
             section_title_style = "QGroupBox { font-weight: 600; }"
         for group in self.section_groups:
             group.setStyleSheet(section_title_style)
+
+    def _apply_modifier_combo_theme(self) -> None:
+        if self.window.dark_mode:
+            combo_style = "QComboBox, QComboBox QAbstractItemView { color: #000000; }"
+        else:
+            combo_style = ""
+        self.hotkey_modifier_combo.setStyleSheet(combo_style)
+
+    def _refresh_logo(self) -> None:
+        logo_pixmap = make_logo_pixmap(self.window.dark_mode)
+        if logo_pixmap.isNull():
+            return
+        self.logo_label.setPixmap(logo_pixmap)
+        self.logo_label.setFixedSize(logo_pixmap.size())
+
+    def _apply_theme_assets(self) -> None:
+        self._apply_modifier_combo_theme()
+        self._refresh_logo()
 
     def _on_autostart_toggled(self, checked: bool) -> None:
         success = self.window.update_autostart(checked)
@@ -1734,6 +1772,7 @@ class MainWindow(QtWidgets.QMainWindow):
         storage.save_config(self.config)
         if self.settings_dialog:
             self.settings_dialog._apply_section_title_style()
+            self.settings_dialog._apply_theme_assets()
 
     def set_hotkey_modifier(self, modifier: str) -> None:
         normalized = normalize_hotkey_modifier(modifier)
