@@ -16,8 +16,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from platformdirs import user_config_dir, user_data_dir
 
-APP_AUTHOR = "OpenKeyFlow"
-APP_NAME = "OpenKeyFlow"
+from openkeyflow.metadata import project_author, project_name
+
+APP_AUTHOR = project_author()
+APP_NAME = project_name()
 
 def _legacy_data_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "okf_data"

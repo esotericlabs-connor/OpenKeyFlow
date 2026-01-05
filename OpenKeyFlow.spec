@@ -1,13 +1,30 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+import tomllib
+
 block_cipher = None
 
+root_dir = Path(__file__).resolve().parent
+metadata_path = root_dir / "openkeyflow.toml"
+
+try:
+    with metadata_path.open("rb") as handle:
+        metadata = tomllib.load(handle)
+except FileNotFoundError:
+    metadata = {}
+
+asset_entries = metadata.get("assets", {}).get("bundled", ["assets"])
+datas = [(str(metadata_path), ".")]
+for asset in asset_entries:
+    asset_path = root_dir / asset
+    datas.append((str(asset_path), asset))
 
 a = Analysis(
     ["OpenKeyFlow.pyw"],
     pathex=[],
     binaries=[],
-    datas=[("assets", "assets")],
+    datas=datas,
     hiddenimports=[],
     hookspath=[],
     runtime_hooks=[],

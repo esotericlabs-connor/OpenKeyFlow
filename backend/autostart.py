@@ -8,7 +8,9 @@ import sys
 from pathlib import Path
 from typing import Tuple
 
-APP_NAME = "OpenKeyFlow"
+from openkeyflow.metadata import project_name
+
+APP_NAME = project_name()
 LINUX_AUTOSTART_NAME = "openkeyflow.desktop"
 MAC_PLIST_NAME = "com.exoteriklabs.openkeyflow.plist"
 

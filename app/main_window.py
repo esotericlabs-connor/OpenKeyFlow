@@ -22,9 +22,10 @@ from backend import autostart
 from backend import storage
 from backend.logging_utils import configure_logging, get_logger
 from backend.trigger_engine import TriggerEngine
+from openkeyflow.metadata import project_name, project_version
 
-APP_NAME = "OpenKeyFlow"
-APP_VERSION = "1.0.0"
+APP_NAME = project_name()
+APP_VERSION = project_version()
 HOTKEY_CLIPBOARD_PREFIX = "OpenKeyFlowHotkeys:"
 HOTKEY_MODIFIERS = ("ctrl", "shift", "alt")
 DEFAULT_HOTKEY_MODIFIER = "ctrl"
