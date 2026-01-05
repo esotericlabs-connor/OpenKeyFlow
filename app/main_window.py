@@ -1247,7 +1247,6 @@ class SettingsDialog(QtWidgets.QDialog):
                 "border: 1px solid #e45b5b;"
                 "border-radius: 4px;"
                 "padding: 4px 26px 4px 10px;"
-                "qproperty-alignment: AlignCenter;"
                 "}"
                 "QComboBox::drop-down {"
                 "subcontrol-origin: padding;"

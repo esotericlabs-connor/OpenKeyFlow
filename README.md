@@ -1,11 +1,18 @@
+<<<<<<< HEAD
 # <img width="600" height="152" alt="image" src=assets\okf_logo_dark.png>
 
 **Free, secure and open-source text expander for Windows, MacOS, and Linux.**
 
 <img width="500" height="322" alt="image" src="https://github.com/user-attachments/assets/0b5b2e0f-1b6f-47dd-9609-ff809f0ba85c" />
+=======
+# OpenKeyFlow
+**Free, secure and open-source text expander for Windows, MacOS, and Linux**
+<img width="500" height="322" alt="image" src="https://github.com/user-attachments/assets/f43666e5-b156-4454-a1ea-162294de6097" />
+>>>>>>> 750054df96cc8b39ba04f232d5362ec6d3230f99
 ![Untitled video](https://github.com/user-attachments/assets/b29ec144-9a06-439b-bb69-61751eb96a90)
 ![Untitled video (1)](https://github.com/user-attachments/assets/b2a31e96-b284-47a7-9fc5-5bd6b69123c1)
-<img width="500" height="322" alt="image" src="https://github.com/user-attachments/assets/d9600c2c-2ffe-4809-a201-dcb28397832d" />
+<img width="500" height="322" alt="image" src="https://github.com/user-attachments/assets/f32f29e0-6941-4bfb-8e82-7098c8b7a68d" />
+
 
 OpenKeyFlow is a free, open source text expander (or text snippet) app — ideal for quick replies, IT workflows, or any repetitive plaintext. Purpose-built, lightweight, secure, and built to stay free and open for everyone. Built with Python, distributed under the GNU General Public License v3. 
 
@@ -147,4 +154,4 @@ If you have any questions/comments about the project, email me at github@connorm
 
 **OpenKeyFlow is distributed under the GNU GPL v3 license and intended for lawful, ethical use only.**
 
-© 2025 OpenKeyFlow — Made with ♥️ at ExoterikLabs
+© 2025 OpenKeyFlow — Made with ♥️ at EsotericLabs
