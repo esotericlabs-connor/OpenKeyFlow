@@ -1096,7 +1096,7 @@ class SettingsDialog(QtWidgets.QDialog):
     def _build_hotkey_button(self, key: str) -> QtWidgets.QPushButton:
         button = QtWidgets.QPushButton(self._display_hotkey_key(key))
         button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        button.setMinimumWidth(140)
+        button.setFixedWidth(140)
         return button
 
     def _build_hotkey_row(self, label_text: str, button: QtWidgets.QPushButton) -> QtWidgets.QHBoxLayout:
@@ -1232,6 +1232,7 @@ class SettingsDialog(QtWidgets.QDialog):
             )
         self.hotkey_modifier_combo.setStyleSheet(combo_style)
         self.hotkey_modifier_combo.setMinimumHeight(26)
+        self.hotkey_modifier_combo.setFixedWidth(140)
 
     def _refresh_logo(self) -> None:
         logo_pixmap = make_logo_pixmap(self.window.dark_mode)
