@@ -131,4 +131,4 @@ If you have any questions/comments about the project, email me at github@connorm
 
 **OpenKeyFlow is distributed under the GNU GPL v3 license and intended for lawful, ethical use only.**
 
-© 2025 OpenKeyFlow — Made with ♥️ at ExoterikLabs
+© 2025 OpenKeyFlow — Made with ♥️ at EsotericLabs
