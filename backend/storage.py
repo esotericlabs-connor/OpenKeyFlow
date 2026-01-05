@@ -6,6 +6,7 @@ import csv
 import json
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
 
@@ -60,6 +61,40 @@ NONCE_BYTES = 12
 
 class ProfilesEncryptionError(RuntimeError):
     """Raised when encrypted profile data cannot be decrypted."""
+
+def _atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding=encoding,
+        dir=path.parent,
+        delete=False,
+    ) as tmp:
+        tmp.write(text)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+    os.replace(tmp.name, path)
+
+def _atomic_write_json(
+    path: Path,
+    payload: Dict[str, object],
+    *,
+    indent: int = 2,
+    ensure_ascii: bool = False,
+) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=path.parent,
+        delete=False,
+    ) as tmp:
+        json.dump(payload, tmp, indent=indent, ensure_ascii=ensure_ascii)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+    os.replace(tmp.name, path)
 
 def _default_profiles() -> Dict[str, object]:
     return {
@@ -126,7 +161,7 @@ def ensure_data_dir() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     _migrate_legacy_data()
     if not HOTKEYS_FILE.exists():
-        HOTKEYS_FILE.write_text("{}", encoding="utf-8")
+        _atomic_write_text(HOTKEYS_FILE, "{}", encoding="utf-8")
     if not PROFILES_FILE.exists():
         profiles = _default_profiles()
         try:
@@ -135,9 +170,9 @@ def ensure_data_dir() -> None:
             hotkeys = {}
         if hotkeys:
             profiles["profiles"][DEFAULT_PROFILE_NAME] = hotkeys
-        PROFILES_FILE.write_text(json.dumps(profiles, indent=2), encoding="utf-8")
+        _atomic_write_json(PROFILES_FILE, profiles)
     if not CONFIG_FILE.exists():
-        CONFIG_FILE.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
+        _atomic_write_json(CONFIG_FILE, DEFAULT_CONFIG, ensure_ascii=True)
     if not CSV_TEMPLATE.exists():
         export_sample_csv(CSV_TEMPLATE)
 
@@ -186,7 +221,7 @@ def _load_hotkeys_file() -> Dict[str, str]:
     if not isinstance(data, dict):
         data = {}
     if not data:
-        HOTKEYS_FILE.write_text("{}", encoding="utf-8")
+        _atomic_write_text(HOTKEYS_FILE, "{}", encoding="utf-8")
     return {str(k): str(v) for k, v in data.items()}
 
 def profiles_are_encrypted() -> bool:
@@ -202,7 +237,7 @@ def load_profiles(*, passphrase: str | None = None) -> Tuple[str, Dict[str, Dict
     ensure_data_dir()
     if not PROFILES_FILE.exists():
         default_profiles = _default_profiles()
-        PROFILES_FILE.write_text(json.dumps(default_profiles, indent=2), encoding="utf-8")
+        _atomic_write_json(PROFILES_FILE, default_profiles)
     with PROFILES_FILE.open("r", encoding="utf-8") as f:
         try:
             data = json.load(f)
@@ -243,8 +278,7 @@ def save_profiles(
         payload_to_write: Dict[str, object] = _encrypt_payload(payload, passphrase)
     else:
         payload_to_write = payload
-    with PROFILES_FILE.open("w", encoding="utf-8") as f:
-        json.dump(payload_to_write, f, indent=2, ensure_ascii=False)        
+    _atomic_write_json(PROFILES_FILE, payload_to_write, ensure_ascii=False)        
 
 def load_config() -> Dict[str, object]:
     ensure_data_dir()
@@ -261,9 +295,8 @@ def save_config(config: Dict[str, object]) -> None:
     ensure_data_dir()
     merged = DEFAULT_CONFIG.copy()
     merged.update(config)
-    with CONFIG_FILE.open("w", encoding="utf-8") as f:
-        json.dump(merged, f, indent=2)
-
+    _atomic_write_json(CONFIG_FILE, merged, ensure_ascii=True)
+    
 def export_hotkeys_to_csv(path: Path, hotkeys: Dict[str, str]) -> None:
     path = Path(path)
     with path.open("w", newline="", encoding="utf-8") as f:

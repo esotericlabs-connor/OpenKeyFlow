@@ -5,6 +5,8 @@ import json
 import secrets
 import sys
 import threading
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Callable, Dict
@@ -323,11 +325,23 @@ class UpdateCheckWorker(QtCore.QObject):
         super().__init__()
         self.os_name = os_name
 
+    def _friendly_error_message(self, exc: Exception) -> str:
+        if isinstance(exc, urllib.error.HTTPError):
+            return "Update check failed due to a server error. Please try again later."
+        if isinstance(exc, urllib.error.URLError):
+            reason = exc.reason
+            if isinstance(reason, TimeoutError):
+                return "Update check timed out. Please try again."
+            return "Unable to reach the update server. Check your internet connection."
+        if isinstance(exc, TimeoutError):
+            return "Update check timed out. Please try again."
+        return "Update check failed. Please try again later."
+
     def run(self) -> None:
         try:
             latest = fetch_latest_version(self.os_name)
         except Exception as exc:
-            self.failed.emit(str(exc))
+            self.failed.emit(self._friendly_error_message(exc))
             return
         if not latest:
             self.failed.emit("No releases found.")
@@ -410,7 +424,7 @@ def readable_text_color(color: QtGui.QColor) -> QtGui.QColor:
 
 def make_logo_pixmap(dark_mode: bool, target_width: int = 220) -> QtGui.QPixmap:
     assets_dir = Path(__file__).resolve().parent.parent / "assets"
-    preferred_name = "okf_logo.png" if dark_mode else "okf_logo_light.png"
+    preferred_name = "okf_logo_dark.png" if dark_mode else "okf_logo_light.png"
     logo_path = assets_dir / preferred_name
     if not logo_path.exists():
         logo_path = assets_dir / "okf_logo.png"
@@ -811,6 +825,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.setWindowTitle("Settings")
         self.setWindowIcon(make_status_icon(self.window.enabled))
         self.setModal(True)
+        self._last_update_check_at = 0.0
+        self._update_cooldown_seconds = 30.0
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -829,14 +845,19 @@ class SettingsDialog(QtWidgets.QDialog):
         header_layout.addWidget(self.logo_label)
         header_layout.addStretch(1)
 
-        updates_layout = QtWidgets.QVBoxLayout()
+        updates_container = QtWidgets.QWidget()
+        updates_container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        updates_layout = QtWidgets.QVBoxLayout(updates_container)
+        updates_layout.setContentsMargins(0, 0, 0, 0)
         self.update_btn = QtWidgets.QPushButton("Check for updates")
+        self.update_btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         self.update_btn.clicked.connect(self._on_check_updates)
         updates_layout.addWidget(self.update_btn)
         self.update_status_label = QtWidgets.QLabel("Update status: not checked.")
         self.update_status_label.setWordWrap(True)
+        self.update_status_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         updates_layout.addWidget(self.update_status_label)
-        header_layout.addLayout(updates_layout)
+        header_layout.addWidget(updates_container, 1, QtCore.Qt.AlignRight)
         layout.addLayout(header_layout)
 
         general_group = QtWidgets.QGroupBox("General")
@@ -857,6 +878,8 @@ class SettingsDialog(QtWidgets.QDialog):
             hint.setWordWrap(True)
             general_layout.addWidget(hint)
         general_layout.addWidget(self.dark_mode_checkbox)
+        hotkeys_group = QtWidgets.QGroupBox("App Global Hotkeys")
+        hotkeys_layout = QtWidgets.QVBoxLayout(hotkeys_group)
         modifier_row = QtWidgets.QHBoxLayout()
         modifier_label = QtWidgets.QLabel("Modifier key:")
         self.hotkey_modifier_combo = QtWidgets.QComboBox()
@@ -869,50 +892,56 @@ class SettingsDialog(QtWidgets.QDialog):
         self._apply_modifier_combo_theme()
         modifier_row.addWidget(modifier_label)
         modifier_row.addWidget(self.hotkey_modifier_combo, 1)
-        general_layout.addLayout(modifier_row)
+        hotkeys_layout.addLayout(modifier_row)
 
         self.quick_add_hotkey_btn = self._build_hotkey_button(self.window.quick_add_key)
         quick_add_row = self._build_hotkey_row("Quick Add hotkey:", self.quick_add_hotkey_btn)
         self.quick_add_hotkey_btn.clicked.connect(lambda: self._begin_listening("quick_add"))
                 
-        general_layout.addLayout(quick_add_row)
+        hotkeys_layout.addLayout(quick_add_row)
         self.profile_switch_hotkey_btn = self._build_hotkey_button(self.window.profile_switch_key)
         profile_switch_row = self._build_hotkey_row("Profile Switch hotkey:", self.profile_switch_hotkey_btn)
         self.profile_switch_hotkey_btn.clicked.connect(lambda: self._begin_listening("profile_switch"))
-        general_layout.addLayout(profile_switch_row)
+        hotkeys_layout.addLayout(profile_switch_row)
 
         self.toggle_hotkey_btn = self._build_hotkey_button(self.window.toggle_hotkey_key)
         toggle_row = self._build_hotkey_row("Toggle OpenKeyFlow hotkey:", self.toggle_hotkey_btn)
         self.toggle_hotkey_btn.clicked.connect(lambda: self._begin_listening("toggle"))
-        general_layout.addLayout(toggle_row)
+        hotkeys_layout.addLayout(toggle_row)
         reset_hotkeys_row = QtWidgets.QHBoxLayout()
         reset_hotkeys_row.addStretch(1)
         self.reset_hotkeys_btn = QtWidgets.QPushButton("Reset global hotkeys")
         self.reset_hotkeys_btn.clicked.connect(self._on_reset_hotkeys)
         reset_hotkeys_row.addWidget(self.reset_hotkeys_btn)
-        general_layout.addLayout(reset_hotkeys_row)
+        hotkeys_layout.addLayout(reset_hotkeys_row)
+        general_layout.addWidget(hotkeys_group)
         content_layout = QtWidgets.QHBoxLayout()
         left_column = QtWidgets.QVBoxLayout()
         right_column = QtWidgets.QVBoxLayout()
         left_column.setSpacing(12)
         right_column.setSpacing(12)
 
-        left_column.addWidget(general_group)
+        general_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        left_column.addWidget(general_group, 1)
 
         data_group = QtWidgets.QGroupBox("Data & Import/Export")
+        data_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         data_layout = QtWidgets.QHBoxLayout(data_group)
         import_btn = QtWidgets.QPushButton("Import CSV")
         export_btn = QtWidgets.QPushButton("Export CSV")
         export_sample_btn = QtWidgets.QPushButton("Export Sample CSV")
+        for button in (import_btn, export_btn, export_sample_btn):
+            button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         import_btn.clicked.connect(self.window.import_csv)
         export_btn.clicked.connect(self.window.export_csv)
         export_sample_btn.clicked.connect(self.window.export_sample_csv)
         data_layout.addWidget(import_btn)
         data_layout.addWidget(export_btn)
         data_layout.addWidget(export_sample_btn)
-        left_column.addWidget(data_group)
+        left_column.addWidget(data_group, 1)
 
         privacy_group = QtWidgets.QGroupBox("Privacy & Security")
+        privacy_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         privacy_layout = QtWidgets.QVBoxLayout(privacy_group)
 
         self.encryption_checkbox = QtWidgets.QCheckBox("Encrypt profiles with a passphrase")
@@ -932,13 +961,15 @@ class SettingsDialog(QtWidgets.QDialog):
 
         self.clipboard_checkbox = None
 
-        left_column.addWidget(privacy_group)
+        left_column.addWidget(privacy_group, 1)
 
         profiles_group = QtWidgets.QGroupBox("Profiles")
+        profiles_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         profiles_layout = QtWidgets.QVBoxLayout(profiles_group)
         self.profile_list = QtWidgets.QListWidget()
         self.profile_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.profile_list.setMaximumHeight(160)
+        self.profile_list.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         profiles_layout.addWidget(self.profile_list)
 
         profile_buttons_row = QtWidgets.QHBoxLayout()
@@ -952,10 +983,9 @@ class SettingsDialog(QtWidgets.QDialog):
         delete_profile_btn.clicked.connect(self._on_delete_profile)
         set_active_btn.clicked.connect(self._on_set_active_profile)
 
-        profile_buttons_row.addWidget(new_profile_btn)
-        profile_buttons_row.addWidget(rename_profile_btn)
-        profile_buttons_row.addWidget(delete_profile_btn)
-        profile_buttons_row.addWidget(set_active_btn)
+        for button in (new_profile_btn, rename_profile_btn, delete_profile_btn, set_active_btn):
+            button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            profile_buttons_row.addWidget(button)
         profiles_layout.addLayout(profile_buttons_row)
 
         profile_color_row = QtWidgets.QHBoxLayout()
@@ -976,10 +1006,12 @@ class SettingsDialog(QtWidgets.QDialog):
         profile_color_row.addStretch(1)
         profiles_layout.addLayout(profile_color_row)
 
-        right_column.addWidget(profiles_group)
+        right_column.addWidget(profiles_group, 1)
 
         logging_group = QtWidgets.QGroupBox("Diagnostics")
+        logging_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         logging_layout = QtWidgets.QGridLayout(logging_group)
+        right_column.addWidget(logging_group, 1)
         self.logging_checkbox = QtWidgets.QCheckBox("Enable debug logging")
         self.logging_checkbox.setChecked(bool(self.window.config.get("logging_enabled", False)))
         self.logging_checkbox.toggled.connect(self._on_logging_toggled)
@@ -995,6 +1027,7 @@ class SettingsDialog(QtWidgets.QDialog):
         right_column.addWidget(logging_group)
 
         links_group = QtWidgets.QGroupBox("Links")
+        links_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         links_layout = QtWidgets.QHBoxLayout(links_group)
         donate_btn = QtWidgets.QPushButton("Donate")
         donate_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -1013,13 +1046,11 @@ class SettingsDialog(QtWidgets.QDialog):
                 QtCore.QUrl("https://github.com/exoteriklabs/OpenKeyFlow/blob/main/README.md")
             )
         )
-        links_layout.addWidget(donate_btn)
-        links_layout.addWidget(github_btn)
-        links_layout.addWidget(help_btn)
-        right_column.addWidget(links_group)
+        for button in (donate_btn, github_btn, help_btn):
+            button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            links_layout.addWidget(button)
+        right_column.addWidget(links_group, 1)
 
-        left_column.addStretch(1)
-        right_column.addStretch(1)
         content_layout.addLayout(left_column, 1)
         content_layout.addLayout(right_column, 1)
         layout.addLayout(content_layout)
@@ -1207,6 +1238,13 @@ class SettingsDialog(QtWidgets.QDialog):
         self.window.change_profiles_passphrase()
 
     def _on_check_updates(self) -> None:
+        now = time.monotonic()
+        if now - self._last_update_check_at < self._update_cooldown_seconds:
+            self.update_status_label.setText(
+                "Update status: please wait a moment before checking again."
+            )
+            return
+        self._last_update_check_at = now
         self.update_btn.setEnabled(False)
         self.update_status_label.setText("Update status: checking...")
         os_name = self.window.current_os_label()
