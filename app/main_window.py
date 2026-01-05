@@ -710,7 +710,12 @@ class QuickAddDialog(QtWidgets.QDialog):
         if parent:
             self.setWindowIcon(make_status_icon(getattr(parent, "enabled", True)))
         self.setModal(True)
-        self.setWindowFlags(self.windowFlags() | QtCore.Qt.Tool | QtCore.Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(
+            self.windowFlags()
+            | QtCore.Qt.Tool
+            | QtCore.Qt.WindowStaysOnTopHint
+            | QtCore.Qt.FramelessWindowHint
+        )
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -732,9 +737,20 @@ class QuickAddDialog(QtWidgets.QDialog):
         title_font.setPointSize(title_font.pointSize() + 1)
         title_font.setBold(True)
         self.header_title.setFont(title_font)
+        self.close_button = QtWidgets.QToolButton()
+        self.close_button.setObjectName("quickAddCloseButton")
+        self.close_button.setText("✕")
+        self.close_button.setCursor(QtCore.Qt.PointingHandCursor)
+        self.close_button.clicked.connect(self.reject)
+        self.close_button.setAutoRaise(True)
         self.header_hint = QtWidgets.QLabel("Review the output, choose a trigger, then add.")
         self.header_hint.setWordWrap(True)
-        header_layout.addWidget(self.header_title)
+        header_top_layout = QtWidgets.QHBoxLayout()
+        header_top_layout.setContentsMargins(0, 0, 0, 0)
+        header_top_layout.addWidget(self.header_title)
+        header_top_layout.addStretch(1)
+        header_top_layout.addWidget(self.close_button)
+        header_layout.addLayout(header_top_layout)
         header_layout.addWidget(self.header_hint)
         card_layout.addWidget(self.header_frame)
 
@@ -772,6 +788,16 @@ class QuickAddDialog(QtWidgets.QDialog):
                 f"color: {text_color.name()};"
                 "border-radius: 8px;"
                 "border: 1px solid rgba(0, 0, 0, 0.2);"
+                "}"
+                "QToolButton#quickAddCloseButton {"
+                f"color: {text_color.name()};"
+                "border: none;"
+                "padding: 2px;"
+                "border-radius: 6px;"
+                "background: transparent;"
+                "}"
+                "QToolButton#quickAddCloseButton:hover {"
+                "background: rgba(255, 255, 255, 0.18);"
                 "}"
             )
         )

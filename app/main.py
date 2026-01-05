@@ -23,6 +23,7 @@ def main() -> None:
 
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setQuitOnLastWindowClosed(False)
 
     profiles_encrypted = storage.profiles_are_encrypted()
     if profiles_encrypted and not config.get("profiles_encrypted"):
