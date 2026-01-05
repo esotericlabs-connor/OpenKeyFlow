@@ -1,29 +1,46 @@
-# OpenKeyFlow
-**Free, secure and open-source text expander for Windows, MacOS, and Linux**
+# <img width="600" height="152" alt="image" src=assets\okf_logo_dark.png>
+
+**Free, secure and open-source text expander for Windows, MacOS, and Linux.**
+
 <img width="500" height="322" alt="image" src="https://github.com/user-attachments/assets/0b5b2e0f-1b6f-47dd-9609-ff809f0ba85c" />
 ![Untitled video](https://github.com/user-attachments/assets/b29ec144-9a06-439b-bb69-61751eb96a90)
 ![Untitled video (1)](https://github.com/user-attachments/assets/b2a31e96-b284-47a7-9fc5-5bd6b69123c1)
 <img width="500" height="322" alt="image" src="https://github.com/user-attachments/assets/d9600c2c-2ffe-4809-a201-dcb28397832d" />
 
-OpenKeyFlow lets you define custom text snippets that expand automatically as you type — ideal for quick replies, IT workflows, or any repetitive plaintext. Purpose-built, lightweight, secure, and built to stay free and open for everyone. Built with Python, distributed under the GNU General Public License v3. 
+OpenKeyFlow is a free, open source text expander (or text snippet) app — ideal for quick replies, IT workflows, or any repetitive plaintext. Purpose-built, lightweight, secure, and built to stay free and open for everyone. Built with Python, distributed under the GNU General Public License v3. 
 
-Download for Windows here:
-https://github.com/exoteriklabs/OpenKeyFlow/releases/download/release/OpenKeyFlow-v0.0.1.zip
+VERSION 1.0 OUT NOW
 
-Windows SHA256 Hash (OpenKeyFlow-v0.0.1.zip):
+Download for Windows (v1.0) here:
+
+
+Windows SHA256 Hash (OpenKeyFlow-v1.0.0-exe.zip):
 D285C00096AC355C4C81D357D5CB578BE7F044C562270241B326C0D144427AA0
+
+Windows SHA256 Hash (OpenKeyFlow-v1.0.0-installer.exe):
 
 ---
 
 ## Features
 
--  **Instant text expander** — type a short trigger (e.g. `-email1`) and watch it type immediately.  
--  **Persistent storage** — saves your hotkeys and expansions in a simple JSON file.  
--  **CSV import/export** — manage or share your hotkey lists easily from a CSV.  
--  **Autostart** — run silently in your tray at login and startup.
--  **Local-only** — no network access, no data collection outside of the JSON/CSV, built with security in mind.
--  **Special Add** - use triggers for multiple lines of text (emails, signatures, code, etc.)
--  **More coming soon!**
+- **Instant text expander** — type a short trigger (e.g. `-email1`) and watch it output immediately.
+- **Global hotkeys** — system-wide shortcuts to enable/disable OpenKeyFlow, switch profiles or add a hotkey.
+- **Persistent storage** — saves your hotkeys and expansions in a simple local JSON file.
+- **CSV import/export** — manage or share your hotkey lists easily from a CSV.
+- **Clipboard-first workflow** — copy text anywhere and quickly turn it into a trigger using CTRL + F10.
+- **Quick-add menu** — lightweight popup to create or manage entries without opening settings.
+- **Search & filter** — instantly find triggers and outputs in large lists.
+- **Autostart** — run silently in your tray at login and startup.
+- **Enable / disable on demand** — instantly pause or resume all expansions via CTRL + F12 hotkey or menu.
+- **Conflict-aware design** — avoids interfering with existing application shortcuts where possible.
+- **Password protection** — restrict access to settings and management features.
+- **Debug & logging mode** — optional local logs for troubleshooting and transparency.
+- **Light & dark mode** — clean UI that adapts to system or user preference.
+- **Cross-platform** — Windows-first with Linux support and macOS planned.
+- **Local-only** — no network access, no telemetry, no cloud dependencies.
+- **Security-minded** — predictable behavior, minimal permissions, transparent data handling.
+- **Self-contained builds** — portable executable and installer options available.
+- **Open & extensible** — designed to grow without breaking existing workflows.
 
 ---
 

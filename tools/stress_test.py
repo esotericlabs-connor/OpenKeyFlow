@@ -7,11 +7,17 @@ import contextlib
 import os
 import random
 import string
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Tuple
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 
 from backend import autostart, hooks, logging_utils, storage
 import backend.trigger_engine as trigger_engine
