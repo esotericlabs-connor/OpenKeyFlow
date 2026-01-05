@@ -1,6 +1,7 @@
 """Qt application window for OpenKeyFlow."""
 from __future__ import annotations
 
+import base64
 import json
 import secrets
 import sys
@@ -15,6 +16,7 @@ from logging import Logger
 
 from PyQt5 import QtCore, QtGui, QtWidgets, QtPrintSupport
 
+from app.embedded_assets import LOGO_DARK_PNG, LOGO_LIGHT_PNG
 from app.resources import resource_path
 from backend import autostart
 from backend import storage
@@ -431,10 +433,12 @@ def make_logo_pixmap(dark_mode: bool, target_width: int = 220) -> QtGui.QPixmap:
         logo_path = assets_dir / "okf_logo.png"
     if not logo_path.exists():
         logo_path = assets_dir / "ofk_logo.png"
-    pixmap = QtGui.QPixmap(str(logo_path))
-    if pixmap.isNull():
-        return pixmap
-    if pixmap.width() == 0:
+    pixmap = QtGui.QPixmap(str(logo_path)) if logo_path.exists() else QtGui.QPixmap()
+    if pixmap.isNull() or pixmap.width() == 0:
+        logo_b64 = LOGO_DARK_PNG if dark_mode else LOGO_LIGHT_PNG
+        pixmap = QtGui.QPixmap()
+        pixmap.loadFromData(base64.b64decode(logo_b64), "PNG")
+    if pixmap.isNull() or pixmap.width() == 0:
         return pixmap
     target_height = round((pixmap.height() / pixmap.width()) * target_width)
     return pixmap.scaled(
