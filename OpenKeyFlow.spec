@@ -7,7 +7,7 @@ from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
-root_dir = Path(__file__).resolve().parent
+root_dir = Path.cwd()
 metadata_path = root_dir / "openkeyflow.toml"
 
 try:
