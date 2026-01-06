@@ -9,6 +9,8 @@ APP_NAME="OpenKeyFlow"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 BUILD_ROOT="${BUILD_ROOT:-"$ROOT_DIR/dist/appimage"}"
 APPDIR="$BUILD_ROOT/${APP_NAME}.AppDir"
+CLEANUP="${CLEANUP:-1}"
+
 
 # ------------------------------------------------------------
 # Read version (TOML-safe, Py3.11+)
@@ -125,5 +127,17 @@ ARCH="$(uname -m)"
 OUTPUT="${OUTPUT:-"$ROOT_DIR/dist/${APP_NAME}-${VERSION}-${ARCH}.AppImage"}"
 
 "$APPIMAGETOOL" "$APPDIR" "$OUTPUT"
+chmod +x "$OUTPUT"
+
+if command -v ldconfig >/dev/null 2>&1; then
+  if ! ldconfig -p 2>/dev/null | rg -q 'libfuse\.so\.2'; then
+    echo "⚠️  libfuse2 not detected. If the AppImage won't launch, install libfuse2 or run with:" >&2
+    echo "    APPIMAGE_EXTRACT_AND_RUN=1 \"$OUTPUT\"" >&2
+  fi
+fi
 
 echo "✔ AppImage created at: $OUTPUT"
+
+if [[ "$CLEANUP" == "1" ]]; then
+  rm -rf "$APPDIR" "$ROOT_DIR/build" "$ROOT_DIR/dist/$APP_NAME"
+fi
