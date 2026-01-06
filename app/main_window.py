@@ -743,10 +743,8 @@ class BaseAddDialog(QtWidgets.QDialog):
             self.ok_button.setDefault(True)
         if self.cancel_button is not None:
             self.cancel_button.clicked.connect(self.reject)
-        self.size_grip = QtWidgets.QSizeGrip(self.card)
         footer_layout = QtWidgets.QHBoxLayout()
         footer_layout.addWidget(self.button_box, 1, QtCore.Qt.AlignRight)
-        footer_layout.addWidget(self.size_grip, 0, QtCore.Qt.AlignRight)
         card_layout.addLayout(footer_layout)
 
         shadow = QtWidgets.QGraphicsDropShadowEffect(self)
@@ -805,19 +803,21 @@ class BaseAddDialog(QtWidgets.QDialog):
     def set_theme(self, dark_mode: bool) -> None:
         if dark_mode:
             background = "#1f1f24"
-            field_bg = "#15151a"
-            field_border = "#3a3a44"
+            field_bg = "#1f2128"
+            field_border = "#ff8080"
+            field_text = "#ffcccc"
             text_color = "#f5f5f5"
         else:
             background = "#f5f6f8"
             field_bg = "#ffffff"
             field_border = "#c9c9cf"
+            field_text = "#1c1c1e"
             text_color = "#1c1c1e"
         self.card.setStyleSheet(
             (
                 "QFrame#quickAddCard {"
                 f"background-color: {background};"
-                f"color: {text_color};"
+                f"color: {field_text};"
                 "border-radius: 12px;"
                 "border: 1px solid rgba(0, 0, 0, 0.12);"
                 "}"
@@ -2755,6 +2755,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_profile_button_color()
         self._sync_profile_ui()
         self._sync_quick_add_dialog()
+        if name == self.current_profile:
+            self._sync_active_add_dialog()
 
     def _show_profile_switch_toast(self, profile_name: str) -> None:
         color_hex = self.profile_color(profile_name) or "#f1c40f"
@@ -2796,6 +2798,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quick_add_dialog.set_theme(self.dark_mode)
         hotkey_label = self._compose_hotkey(self.profile_switch_key)
         self.quick_add_dialog.set_profile_info(
+            self.current_profile,
+            hotkey_label.upper() if hotkey_label else None,
+        )
+
+    def _sync_active_add_dialog(self) -> None:
+        app = QtWidgets.QApplication.instance()
+        if not app:
+            return
+        active_modal = app.activeModalWidget()
+        if not isinstance(active_modal, BaseAddDialog):
+            return
+        color_hex = self.profile_color(self.current_profile) or "#f1c40f"
+        active_modal.set_header_color(QtGui.QColor(color_hex))
+        active_modal.set_theme(self.dark_mode)
+        hotkey_label = self._compose_hotkey(self.profile_switch_key)
+        active_modal.set_profile_info(
             self.current_profile,
             hotkey_label.upper() if hotkey_label else None,
         )
@@ -3042,6 +3060,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_status_ui()
         self._sync_profile_ui()
         self._sync_quick_add_dialog()
+        self._sync_active_add_dialog()
         if announce:
             self._show_profile_switch_toast(profile_name)
         return True
