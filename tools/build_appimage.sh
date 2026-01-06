@@ -53,31 +53,27 @@ if [[ ! -e "dist/$APP_NAME" ]]; then
 fi
 
 # ------------------------------------------------------------
-# 2/4 – Assemble AppDir
+# 2/4 – Prepare linuxdeploy inputs
 # ------------------------------------------------------------
-echo "[2/4] Assembling AppDir"
+echo "[2/4] Preparing linuxdeploy inputs"
 rm -rf "$APPDIR"
-mkdir -p \
-  "$APPDIR/usr/bin" \
-  "$APPDIR/usr/share/applications" \
-  "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+mkdir -p "$BUILD_ROOT"
 
 if [[ -f "dist/$APP_NAME" ]]; then
-  install -m 755 "dist/$APP_NAME" "$APPDIR/usr/bin/$APP_NAME"
-  RUN_TARGET='${HERE}/usr/bin/OpenKeyFlow'
-  LD_SETUP=""
+  APP_EXECUTABLE="$ROOT_DIR/dist/$APP_NAME"
 elif [[ -d "dist/$APP_NAME" ]]; then
-  mkdir -p "$APPDIR/usr/lib/$APP_NAME"
-  cp -a "dist/$APP_NAME/." "$APPDIR/usr/lib/$APP_NAME/"
-  ln -s "../lib/$APP_NAME/$APP_NAME" "$APPDIR/usr/bin/$APP_NAME"
-  RUN_TARGET='${HERE}/usr/lib/OpenKeyFlow/OpenKeyFlow'
-  LD_SETUP='export LD_LIBRARY_PATH="${HERE}/usr/lib/OpenKeyFlow:${LD_LIBRARY_PATH:-}"'
+  APP_EXECUTABLE="$ROOT_DIR/dist/$APP_NAME/$APP_NAME"
 else
   echo "PyInstaller output at dist/$APP_NAME is not a file or directory" >&2
   exit 1
 fi
 
-DESKTOP_FILE="$APPDIR/usr/share/applications/openkeyflow.desktop"
+if [[ ! -x "$APP_EXECUTABLE" ]]; then
+  echo "Executable not found or not executable: $APP_EXECUTABLE" >&2
+  exit 1
+fi
+
+DESKTOP_FILE="$BUILD_ROOT/openkeyflow.desktop"
 cat > "$DESKTOP_FILE" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
@@ -88,35 +84,23 @@ Categories=Utility;
 Terminal=false
 DESKTOP
 
-cp "$DESKTOP_FILE" "$APPDIR/openkeyflow.desktop"
-
-cp "assets/okf_logo_light.png" \
-  "$APPDIR/usr/share/icons/hicolor/256x256/apps/openkeyflow.png"
-cp "assets/okf_logo_light.png" "$APPDIR/openkeyflow.png"
-
-# ------------------------------------------------------------
-# AppRun (absolute, robust)
-# ------------------------------------------------------------
-cat > "$APPDIR/AppRun" <<APPRUN
-#!/usr/bin/env bash
-set -euo pipefail
-HERE="$(cd "$(dirname "$0")" && pwd)"
-${LD_SETUP}
-exec "${RUN_TARGET}" "$@"
-APPRUN
-chmod +x "$APPDIR/AppRun"
+ICON_FILE="$ROOT_DIR/assets/okf_logo_light.png"
+if [[ ! -f "$ICON_FILE" ]]; then
+  echo "Icon file not found at $ICON_FILE" >&2
+  exit 1
+fi
 
 # ------------------------------------------------------------
-# 3/4 – appimagetool
+# 3/4 – linuxdeploy
 # ------------------------------------------------------------
-APPIMAGETOOL="${APPIMAGETOOL:-"$BUILD_ROOT/appimagetool.AppImage"}"
+LINUXDEPLOY="${LINUXDEPLOY:-"$BUILD_ROOT/linuxdeploy-x86_64.AppImage"}"
+LINUXDEPLOY_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
 
-if [[ ! -x "$APPIMAGETOOL" ]]; then
-  echo "[3/4] Downloading appimagetool"
+if [[ ! -x "$LINUXDEPLOY" ]]; then
+  echo "[3/4] Downloading linuxdeploy"
   mkdir -p "$BUILD_ROOT"
-  curl -L -o "$APPIMAGETOOL" \
-    "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
-  chmod +x "$APPIMAGETOOL"
+  curl -L -o "$LINUXDEPLOY" "$LINUXDEPLOY_URL"
+  chmod +x "$LINUXDEPLOY"
 fi
 
 # ------------------------------------------------------------
@@ -126,7 +110,16 @@ echo "[4/4] Building AppImage"
 ARCH="$(uname -m)"
 OUTPUT="${OUTPUT:-"$ROOT_DIR/dist/${APP_NAME}-${VERSION}-${ARCH}.AppImage"}"
 
-"$APPIMAGETOOL" "$APPDIR" "$OUTPUT"
+"$LINUXDEPLOY" \
+  --appdir "$APPDIR" \
+  --executable "$APP_EXECUTABLE" \
+  --desktop-file "$DESKTOP_FILE" \
+  --icon-file "$ICON_FILE" \
+  --output appimage
+
+if [[ -e "$ROOT_DIR"/*.AppImage ]]; then
+  mv "$ROOT_DIR"/*.AppImage "$OUTPUT"
+fi
 chmod +x "$OUTPUT"
 
 if command -v ldconfig >/dev/null 2>&1; then
@@ -139,5 +132,5 @@ fi
 echo "✔ AppImage created at: $OUTPUT"
 
 if [[ "$CLEANUP" == "1" ]]; then
-  rm -rf "$APPDIR" "$ROOT_DIR/build" "$ROOT_DIR/dist/$APP_NAME"
+  rm -rf "$APPDIR" "$ROOT_DIR/build" "$ROOT_DIR/dist/$APP_NAME" "$DESKTOP_FILE"
 fi
