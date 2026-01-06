@@ -711,9 +711,9 @@ class QuickAddDialog(QtWidgets.QDialog):
         if parent:
             self.setWindowIcon(make_status_icon(getattr(parent, "enabled", True)))
         self.setModal(True)
+        self.setWindowModality(QtCore.Qt.ApplicationModal)
         self.setWindowFlags(
             self.windowFlags()
-            | QtCore.Qt.Tool
             | QtCore.Qt.WindowStaysOnTopHint
             | QtCore.Qt.FramelessWindowHint
         )
@@ -756,6 +756,9 @@ class QuickAddDialog(QtWidgets.QDialog):
         header_top_layout.addWidget(self.close_button)
         header_layout.addLayout(header_top_layout)
         header_layout.addWidget(self.header_hint)
+        self.profile_label = QtWidgets.QLabel("")
+        self.profile_label.setWordWrap(True)
+        header_layout.addWidget(self.profile_label)
         card_layout.addWidget(self.header_frame)
 
         form_layout = QtWidgets.QFormLayout()
@@ -859,6 +862,14 @@ class QuickAddDialog(QtWidgets.QDialog):
                 "}"
             )
         )
+
+    def set_profile_info(self, profile_name: str, switch_hotkey: str | None) -> None:
+        if switch_hotkey:
+            self.profile_label.setText(
+                f"Profile: {profile_name} · Press {switch_hotkey} to switch profiles"
+            )
+        else:
+            self.profile_label.setText(f"Profile: {profile_name}")
 
     def set_clipboard_text(self, text: str) -> None:
         self.set_data("", text, focus_trigger=True)
@@ -1960,6 +1971,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.settings_dialog:
             self.settings_dialog._apply_section_title_style()
             self.settings_dialog._apply_theme_assets()
+        self._sync_quick_add_dialog()
 
     def set_hotkey_modifier(self, modifier: str) -> bool:
         normalized = normalize_hotkey_modifier(modifier)
@@ -1988,6 +2000,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._warn_if_hotkey_conflict(self.quick_add_hotkey, "Quick Add hotkey")
         self._warn_if_hotkey_conflict(self.profile_switch_hotkey, "Profile Switch hotkey")
         self._warn_if_hotkey_conflict(self.toggle_hotkey, "Toggle OpenKeyFlow hotkey")
+        self._sync_quick_add_dialog()
         return True
 
     def set_quick_add_key(self, key: str) -> bool:
@@ -2034,6 +2047,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persist_hotkey_settings()
         self._rebuild_global_hotkeys(previous)
         self._warn_if_hotkey_conflict(self.profile_switch_hotkey, "Profile Switch hotkey")
+        self._sync_quick_add_dialog()
         return True
 
     def set_toggle_hotkey_key(self, key: str) -> bool:
@@ -2708,6 +2722,7 @@ class MainWindow(QtWidgets.QMainWindow):
         storage.save_config(self.config)
         self._apply_profile_button_color()
         self._sync_profile_ui()
+        self._sync_quick_add_dialog()
 
     def _show_profile_switch_toast(self, profile_name: str) -> None:
         color_hex = self.profile_color(profile_name) or "#f1c40f"
@@ -2738,10 +2753,20 @@ class MainWindow(QtWidgets.QMainWindow):
             dialog = QuickAddDialog(self)
             dialog.accepted.connect(self._on_quick_add_accepted)
             self.quick_add_dialog = dialog
+        self._sync_quick_add_dialog()
+        return self.quick_add_dialog
+
+    def _sync_quick_add_dialog(self) -> None:
+        if self.quick_add_dialog is None:
+            return
         color_hex = self.profile_color(self.current_profile) or "#f1c40f"
         self.quick_add_dialog.set_header_color(QtGui.QColor(color_hex))
         self.quick_add_dialog.set_theme(self.dark_mode)
-        return self.quick_add_dialog
+        hotkey_label = self._compose_hotkey(self.profile_switch_key)
+        self.quick_add_dialog.set_profile_info(
+            self.current_profile,
+            hotkey_label.upper() if hotkey_label else None,
+        )
 
     def _on_quick_add_accepted(self) -> None:
         if self.quick_add_dialog is None:
@@ -2984,6 +3009,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.populate_model()
         self.refresh_status_ui()
         self._sync_profile_ui()
+        self._sync_quick_add_dialog()
         if announce:
             self._show_profile_switch_toast(profile_name)
         return True
