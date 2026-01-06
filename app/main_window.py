@@ -729,6 +729,8 @@ class QuickAddDialog(QtWidgets.QDialog):
 
         self.header_frame = QtWidgets.QFrame()
         self.header_frame.setObjectName("quickAddHeader")
+        self._drag_position: QtCore.QPoint | None = None
+        self.header_frame.installEventFilter(self)
         header_layout = QtWidgets.QVBoxLayout(self.header_frame)
         header_layout.setContentsMargins(14, 10, 14, 10)
         header_layout.setSpacing(4)
@@ -999,7 +1001,7 @@ class SettingsDialog(QtWidgets.QDialog):
         data_layout.addWidget(export_sample_btn)
         left_column.addWidget(data_group, 2)
 
-        privacy_group = QtWidgets.QGroupBox("Privacy & Security")
+        privacy_group = QtWidgets.QGroupBox("Security")
         privacy_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         privacy_layout = QtWidgets.QVBoxLayout(privacy_group)
 
