@@ -130,7 +130,7 @@ OUTPUT="${OUTPUT:-"$ROOT_DIR/dist/${APP_NAME}-${VERSION}-${ARCH}.AppImage"}"
 chmod +x "$OUTPUT"
 
 if command -v ldconfig >/dev/null 2>&1; then
-  if ! ldconfig -p 2>/dev/null | rg -q 'libfuse\.so\.2'; then
+  if ! ldconfig -p 2>/dev/null | grep -q 'libfuse\.so\.2'; then
     echo "⚠️  libfuse2 not detected. If the AppImage won't launch, install libfuse2 or run with:" >&2
     echo "    APPIMAGE_EXTRACT_AND_RUN=1 \"$OUTPUT\"" >&2
   fi
