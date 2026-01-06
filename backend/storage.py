@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import csv
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -20,6 +21,7 @@ from openkeyflow.metadata import project_author, project_name
 
 APP_AUTHOR = project_author()
 APP_NAME = project_name()
+logger = logging.getLogger("openkeyflow")
 
 def _legacy_data_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "okf_data"
@@ -169,6 +171,7 @@ def ensure_data_dir() -> None:
         try:
             hotkeys = _load_hotkeys_file()
         except Exception:
+            logger.warning("Failed to load legacy hotkeys; continuing with defaults.", exc_info=True)
             hotkeys = {}
         if hotkeys:
             profiles["profiles"][DEFAULT_PROFILE_NAME] = hotkeys
@@ -199,11 +202,11 @@ def _migrate_legacy_data() -> None:
             try:
                 leftover.unlink()
             except Exception:
-                pass
+                logger.debug("Failed to remove legacy file %s", leftover, exc_info=True)
         try:
             legacy_dir.rmdir()
         except Exception:
-            pass
+            logger.debug("Failed to remove legacy directory %s", legacy_dir, exc_info=True)
 
 def load_hotkeys(*, passphrase: str | None = None) -> Dict[str, str]:
     current_profile, profiles = load_profiles(passphrase=passphrase)

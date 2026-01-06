@@ -2442,7 +2442,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.quick_add_hotkey:
                 self.engine.remove_hotkey(self.quick_add_hotkey)
         except Exception:
-            pass
+            self.logger.exception("Failed to remove global hotkeys during shutdown")
         self._allow_close = True
         QtWidgets.QApplication.instance().quit()
 
