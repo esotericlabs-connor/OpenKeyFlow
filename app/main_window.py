@@ -640,74 +640,19 @@ def toggle_autostart(parent: QtWidgets.QWidget) -> None:
         else:
             QtWidgets.QMessageBox.warning(parent, "Autostart", f"Failed to enable autostart:\n{message}")
 
-class SpecialAddDialog(QtWidgets.QDialog):
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+class BaseAddDialog(QtWidgets.QDialog):
+    def __init__(
+        self,
+        *,
+        dialog_name: str,
+        header_title: str,
+        header_hint: str,
+        output_placeholder: str,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Special Add")
-        if parent:
-            self.setWindowIcon(make_status_icon(getattr(parent, "enabled", True)))
-        self.setModal(True)
-
-        layout = QtWidgets.QVBoxLayout(self)
-        instructions = QtWidgets.QLabel(
-            "Enter a trigger and multi-line output. The trigger cannot contain spaces."
-        )
-        instructions.setWordWrap(True)
-        layout.addWidget(instructions)
-
-        form_layout = QtWidgets.QFormLayout()
-        self.trigger_edit = QtWidgets.QLineEdit()
-        self.trigger_edit.setPlaceholderText("Trigger (no spaces)")
-        form_layout.addRow("Trigger:", self.trigger_edit)
-
-        self.tab_widget = QtWidgets.QTabWidget()
-        self.output_edit = QtWidgets.QPlainTextEdit()
-        self.output_edit.setPlaceholderText("Expansion output (supports multiple lines)")
-        self.output_edit.setMinimumHeight(160)
-
-        self.code_edit = CodeEditor()
-        self.code_edit.setPlaceholderText("Code block (will be wrapped for you)")
-        self.code_edit.setMinimumHeight(160)
-        fixed_font = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
-        self.code_edit.setFont(fixed_font)
-
-        self.tab_widget.addTab(self.output_edit, "Text")
-        self.tab_widget.addTab(self.code_edit, "Code block")
-        form_layout.addRow("Output:", self.tab_widget)
-        layout.addLayout(form_layout)
-
-        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel | QtWidgets.QDialogButtonBox.Ok)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def get_data(self) -> tuple[str, str]:
-        current_index = self.tab_widget.currentIndex()
-        if current_index == 1:
-            content = self.code_edit.toPlainText()
-            if content.strip():
-                wrapped = content
-                if not content.strip().startswith("```"):
-                    wrapped = f"```\n{content}\n```"
-                return self.trigger_edit.text(), wrapped
-        return self.trigger_edit.text(), self.output_edit.toPlainText()
-
-    def accept(self) -> None:  # noqa: D401 - inherited docs
-        trigger = self.trigger_edit.text().strip()
-        output = self.code_edit.toPlainText() if self.tab_widget.currentIndex() == 1 else self.output_edit.toPlainText()
-        if not trigger or not output.strip():
-            QtWidgets.QMessageBox.warning(self, "Special Add", "Trigger and output are required.")
-            return
-        if " " in trigger:
-            QtWidgets.QMessageBox.warning(self, "Special Add", "Triggers cannot contain spaces.")
-            return
-        self.trigger_edit.setText(trigger)
-        super().accept()
-
-class QuickAddDialog(QtWidgets.QDialog):
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Quick Add")
+        self._dialog_name = dialog_name
+        self.setWindowTitle(dialog_name)
         if parent:
             self.setWindowIcon(make_status_icon(getattr(parent, "enabled", True)))
         self.setModal(True)
@@ -736,7 +681,7 @@ class QuickAddDialog(QtWidgets.QDialog):
         header_layout = QtWidgets.QVBoxLayout(self.header_frame)
         header_layout.setContentsMargins(14, 10, 14, 10)
         header_layout.setSpacing(4)
-        self.header_title = QtWidgets.QLabel("Quick Add from Clipboard")
+        self.header_title = QtWidgets.QLabel(header_title)
         title_font = self.header_title.font()
         title_font.setPointSize(title_font.pointSize() + 1)
         title_font.setBold(True)
@@ -747,7 +692,7 @@ class QuickAddDialog(QtWidgets.QDialog):
         self.close_button.setCursor(QtCore.Qt.PointingHandCursor)
         self.close_button.clicked.connect(self.reject)
         self.close_button.setAutoRaise(True)
-        self.header_hint = QtWidgets.QLabel("Review the output, choose a trigger, then add.")
+        self.header_hint = QtWidgets.QLabel(header_hint)
         self.header_hint.setWordWrap(True)
         header_top_layout = QtWidgets.QHBoxLayout()
         header_top_layout.setContentsMargins(0, 0, 0, 0)
@@ -766,17 +711,39 @@ class QuickAddDialog(QtWidgets.QDialog):
         self.trigger_edit.setPlaceholderText("Trigger (no spaces)")
         form_layout.addRow("Trigger:", self.trigger_edit)
 
+        self.tab_widget = QtWidgets.QTabWidget()
         self.output_edit = QtWidgets.QPlainTextEdit()
-        self.output_edit.setPlaceholderText("Expansion output")
+        self.output_edit.setPlaceholderText(output_placeholder)
         self.output_edit.setLineWrapMode(QtWidgets.QPlainTextEdit.WidgetWidth)
-        self.output_edit.setMinimumHeight(140)
-        form_layout.addRow("Output:", self.output_edit)
+        self.output_edit.setMinimumHeight(160)
+
+        self.code_edit = CodeEditor()
+        self.code_edit.setPlaceholderText("Code block (will be wrapped for you)")
+        self.code_edit.setMinimumHeight(160)
+        fixed_font = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
+        self.code_edit.setFont(fixed_font)
+
+        self.tab_widget.addTab(self.output_edit, "Text")
+        self.tab_widget.addTab(self.code_edit, "Code block")
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
+        self._last_tab_index = self.tab_widget.currentIndex()
+        form_layout.addRow("Output:", self.tab_widget)
         card_layout.addLayout(form_layout)
 
-        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel | QtWidgets.QDialogButtonBox.Ok)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        card_layout.addWidget(buttons)
+        self.button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Cancel | QtWidgets.QDialogButtonBox.Ok
+        )
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        self.ok_button = self.button_box.button(QtWidgets.QDialogButtonBox.Ok)
+        self.cancel_button = self.button_box.button(QtWidgets.QDialogButtonBox.Cancel)
+        if self.ok_button is not None:
+            self.ok_button.clicked.connect(self.accept)
+            self.ok_button.setAutoDefault(True)
+            self.ok_button.setDefault(True)
+        if self.cancel_button is not None:
+            self.cancel_button.clicked.connect(self.reject)
+        card_layout.addWidget(self.button_box)
 
         shadow = QtWidgets.QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(18)
@@ -871,11 +838,10 @@ class QuickAddDialog(QtWidgets.QDialog):
         else:
             self.profile_label.setText(f"Profile: {profile_name}")
 
-    def set_clipboard_text(self, text: str) -> None:
-        self.set_data("", text, focus_trigger=True)
-
+    
     def set_data(self, trigger: str, output: str, *, focus_trigger: bool = False) -> None:
         self.output_edit.setPlainText(output)
+        self.code_edit.setPlainText(output)
         self.trigger_edit.setText(trigger)
         self._resize_for_output(output)
         if focus_trigger:
@@ -886,28 +852,78 @@ class QuickAddDialog(QtWidgets.QDialog):
         lines = text.count("\n") + 1
         if length > 1500 or lines > 20:
             self.output_edit.setMinimumHeight(320)
+            self.code_edit.setMinimumHeight(320)
             self.resize(760, 520)
         elif length > 500 or lines > 6:
             self.output_edit.setMinimumHeight(240)
+            self.code_edit.setMinimumHeight(240)
             self.resize(640, 440)
         else:
             self.output_edit.setMinimumHeight(160)
+            self.code_edit.setMinimumHeight(160)
             self.resize(520, 340)
 
+    def _on_tab_changed(self, index: int) -> None:
+        if index == self._last_tab_index:
+            return
+        previous = self.output_edit if self._last_tab_index == 0 else self.code_edit
+        current = self.output_edit if index == 0 else self.code_edit
+        previous_text = previous.toPlainText()
+        if current.toPlainText() != previous_text:
+            current.setPlainText(previous_text)
+        self._last_tab_index = index
+
+    def _wrap_code_block(self, content: str) -> str:
+        trimmed = content.strip()
+        if not trimmed:
+            return content
+        if trimmed.startswith("```"):
+            return content
+        return f"```\n{content}\n```"
+
     def get_data(self) -> tuple[str, str]:
+        current_index = self.tab_widget.currentIndex()
+        if current_index == 1:
+            content = self.code_edit.toPlainText()
+            if content.strip():
+                return self.trigger_edit.text(), self._wrap_code_block(content)
         return self.trigger_edit.text(), self.output_edit.toPlainText()
 
     def accept(self) -> None:  # noqa: D401 - inherited docs
         trigger = self.trigger_edit.text().strip()
-        output = self.output_edit.toPlainText()
+        output = self.code_edit.toPlainText() if self.tab_widget.currentIndex() == 1 else self.output_edit.toPlainText()
         if not trigger or not output.strip():
-            QtWidgets.QMessageBox.warning(self, "Quick Add", "Trigger and output are required.")
+            QtWidgets.QMessageBox.warning(self, self._dialog_name, "Trigger and output are required.")
             return
         if " " in trigger:
-            QtWidgets.QMessageBox.warning(self, "Quick Add", "Triggers cannot contain spaces.")
+            QtWidgets.QMessageBox.warning(self, self._dialog_name, "Triggers cannot contain spaces.")
             return
         self.trigger_edit.setText(trigger)
         super().accept()
+
+class SpecialAddDialog(BaseAddDialog):
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(
+            dialog_name="Special Add",
+            header_title="Special Add",
+            header_hint="Enter a trigger and multi-line output. The trigger cannot contain spaces.",
+            output_placeholder="Expansion output (supports multiple lines)",
+            parent=parent,
+        )
+
+
+class QuickAddDialog(BaseAddDialog):
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(
+            dialog_name="Quick Add",
+            header_title="Quick Add from Clipboard",
+            header_hint="Review the output, choose a trigger, then add.",
+            output_placeholder="Expansion output",
+            parent=parent,
+        )
+
+    def set_clipboard_text(self, text: str) -> None:
+        self.set_data("", text, focus_trigger=True)
 
 class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, parent: "MainWindow") -> None:  # type: ignore[name-defined]
@@ -2440,6 +2456,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def open_special_add(self) -> None:
         dialog = SpecialAddDialog(self)
+        color_hex = self.profile_color(self.current_profile) or "#f1c40f"
+        dialog.set_header_color(QtGui.QColor(color_hex))
+        dialog.set_theme(self.dark_mode)
+        hotkey_label = self._compose_hotkey(self.profile_switch_key)
+        dialog.set_profile_info(
+            self.current_profile,
+            hotkey_label.upper() if hotkey_label else None,
+        )
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             trigger, output = dialog.get_data()
             self._add_hotkey(trigger, output)
