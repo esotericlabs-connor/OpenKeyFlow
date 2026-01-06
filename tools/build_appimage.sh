@@ -45,7 +45,7 @@ echo "[1/4] Building PyInstaller bundle"
 rm -rf build dist
 pyinstaller OpenKeyFlow.spec
 
-if [[ ! -d "dist/$APP_NAME" ]]; then
+if [[ ! -e "dist/$APP_NAME" ]]; then
   echo "PyInstaller output not found at dist/$APP_NAME" >&2
   exit 1
 fi
@@ -60,7 +60,20 @@ mkdir -p \
   "$APPDIR/usr/share/applications" \
   "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 
-cp -a "dist/$APP_NAME/." "$APPDIR/usr/bin/"
+if [[ -f "dist/$APP_NAME" ]]; then
+  install -m 755 "dist/$APP_NAME" "$APPDIR/usr/bin/$APP_NAME"
+  RUN_TARGET='${HERE}/usr/bin/OpenKeyFlow'
+  LD_SETUP=""
+elif [[ -d "dist/$APP_NAME" ]]; then
+  mkdir -p "$APPDIR/usr/lib/$APP_NAME"
+  cp -a "dist/$APP_NAME/." "$APPDIR/usr/lib/$APP_NAME/"
+  ln -s "../lib/$APP_NAME/$APP_NAME" "$APPDIR/usr/bin/$APP_NAME"
+  RUN_TARGET='${HERE}/usr/lib/OpenKeyFlow/OpenKeyFlow'
+  LD_SETUP='export LD_LIBRARY_PATH="${HERE}/usr/lib/OpenKeyFlow:${LD_LIBRARY_PATH:-}"'
+else
+  echo "PyInstaller output at dist/$APP_NAME is not a file or directory" >&2
+  exit 1
+fi
 
 cat > "$APPDIR/usr/share/applications/openkeyflow.desktop" <<'DESKTOP'
 [Desktop Entry]
@@ -79,11 +92,12 @@ cp "assets/okf_logo_light.png" "$APPDIR/openkeyflow.png"
 # ------------------------------------------------------------
 # AppRun (absolute, robust)
 # ------------------------------------------------------------
-cat > "$APPDIR/AppRun" <<'APPRUN'
+cat > "$APPDIR/AppRun" <<APPRUN
 #!/usr/bin/env bash
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-exec "$HERE/usr/bin/OpenKeyFlow" "$@"
+${LD_SETUP}
+exec "${RUN_TARGET}" "$@"
 APPRUN
 chmod +x "$APPDIR/AppRun"
 
