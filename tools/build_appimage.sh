@@ -75,7 +75,8 @@ else
   exit 1
 fi
 
-cat > "$APPDIR/usr/share/applications/openkeyflow.desktop" <<'DESKTOP'
+DESKTOP_FILE="$APPDIR/usr/share/applications/openkeyflow.desktop"
+cat > "$DESKTOP_FILE" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
 Name=OpenKeyFlow
@@ -84,6 +85,8 @@ Icon=openkeyflow
 Categories=Utility;
 Terminal=false
 DESKTOP
+
+cp "$DESKTOP_FILE" "$APPDIR/openkeyflow.desktop"
 
 cp "assets/okf_logo_light.png" \
   "$APPDIR/usr/share/icons/hicolor/256x256/apps/openkeyflow.png"
