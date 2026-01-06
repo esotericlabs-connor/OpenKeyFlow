@@ -7,6 +7,7 @@ import secrets
 import sys
 import threading
 import time
+import typing
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -731,6 +732,7 @@ class QuickAddDialog(QtWidgets.QDialog):
         self.header_frame.setObjectName("quickAddHeader")
         self._drag_position: QtCore.QPoint | None = None
         self.header_frame.installEventFilter(self)
+        self.header_frame.setCursor(QtCore.Qt.OpenHandCursor)
         header_layout = QtWidgets.QVBoxLayout(self.header_frame)
         header_layout.setContentsMargins(14, 10, 14, 10)
         header_layout.setSpacing(4)
@@ -780,6 +782,27 @@ class QuickAddDialog(QtWidgets.QDialog):
         self.card.setGraphicsEffect(shadow)
 
         self.set_theme(False)
+
+    def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if obj is self.header_frame:
+            if event.type() == QtCore.QEvent.MouseButtonPress:
+                mouse_event = typing.cast(QtGui.QMouseEvent, event)
+                if mouse_event.button() == QtCore.Qt.LeftButton:
+                    self._drag_position = mouse_event.globalPos() - self.frameGeometry().topLeft()
+                    self.header_frame.setCursor(QtCore.Qt.ClosedHandCursor)
+                    return True
+            if event.type() == QtCore.QEvent.MouseMove and self._drag_position is not None:
+                mouse_event = typing.cast(QtGui.QMouseEvent, event)
+                if mouse_event.buttons() & QtCore.Qt.LeftButton:
+                    self.move(mouse_event.globalPos() - self._drag_position)
+                    return True
+            if event.type() == QtCore.QEvent.MouseButtonRelease and self._drag_position is not None:
+                mouse_event = typing.cast(QtGui.QMouseEvent, event)
+                if mouse_event.button() == QtCore.Qt.LeftButton:
+                    self._drag_position = None
+                    self.header_frame.setCursor(QtCore.Qt.OpenHandCursor)
+                    return True
+        return super().eventFilter(obj, event)
 
     def set_header_color(self, color: QtGui.QColor) -> None:
         text_color = readable_text_color(color)
@@ -910,7 +933,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.update_btn = QtWidgets.QPushButton("Check for updates")
         self.update_btn.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         self.update_btn.setMinimumHeight(26)
-        self.update_btn.setFixedWidth(self.update_btn.sizeHint().width())
+        self._lock_update_button_size()
         self.update_btn.clicked.connect(self._on_check_updates)
         updates_layout.addWidget(self.update_btn)
         self.update_status_label = QtWidgets.QLabel("Update status: not checked.")
@@ -1376,6 +1399,14 @@ class SettingsDialog(QtWidgets.QDialog):
         self._update_worker.failed.connect(self._update_thread.quit)
         self._update_thread.finished.connect(self._update_thread.deleteLater)
         self._update_thread.start()
+
+    def _lock_update_button_size(self) -> None:
+        size_hint = self.update_btn.sizeHint()
+        text_width = self.update_btn.fontMetrics().horizontalAdvance(self.update_btn.text())
+        padding = 24
+        width = max(size_hint.width(), text_width + padding)
+        height = max(size_hint.height(), 26)
+        self.update_btn.setFixedSize(width, height)
 
     def _on_update_finished(self, message: str, _up_to_date: bool) -> None:
         self.update_status_label.setText(f"Update status: {message}")
