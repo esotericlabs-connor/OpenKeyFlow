@@ -743,14 +743,19 @@ class BaseAddDialog(QtWidgets.QDialog):
             self.ok_button.setDefault(True)
         if self.cancel_button is not None:
             self.cancel_button.clicked.connect(self.reject)
-        card_layout.addWidget(self.button_box)
+        self.size_grip = QtWidgets.QSizeGrip(self.card)
+        footer_layout = QtWidgets.QHBoxLayout()
+        footer_layout.addWidget(self.button_box, 1, QtCore.Qt.AlignRight)
+        footer_layout.addWidget(self.size_grip, 0, QtCore.Qt.AlignRight)
+        card_layout.addLayout(footer_layout)
 
         shadow = QtWidgets.QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(18)
         shadow.setOffset(0, 6)
         shadow.setColor(QtGui.QColor(0, 0, 0, 150))
         self.card.setGraphicsEffect(shadow)
-
+        self.setMinimumSize(600, 380)
+        self.setSizeGripEnabled(True)
         self.set_theme(False)
 
     def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
@@ -823,6 +828,9 @@ class BaseAddDialog(QtWidgets.QDialog):
                 "border-radius: 6px;"
                 "padding: 6px;"
                 "}"
+                "QPlainTextEdit::viewport {"
+                f"background-color: {field_bg};"
+                "}"
                 "QDialogButtonBox QPushButton {"
                 "padding: 6px 14px;"
                 "border-radius: 6px;"
@@ -851,17 +859,17 @@ class BaseAddDialog(QtWidgets.QDialog):
         length = len(text)
         lines = text.count("\n") + 1
         if length > 1500 or lines > 20:
-            self.output_edit.setMinimumHeight(320)
-            self.code_edit.setMinimumHeight(320)
-            self.resize(760, 520)
+            self.output_edit.setMinimumHeight(360)
+            self.code_edit.setMinimumHeight(360)
+            self.resize(840, 580)
         elif length > 500 or lines > 6:
-            self.output_edit.setMinimumHeight(240)
-            self.code_edit.setMinimumHeight(240)
-            self.resize(640, 440)
+            self.output_edit.setMinimumHeight(280)
+            self.code_edit.setMinimumHeight(280)
+            self.resize(720, 480)
         else:
-            self.output_edit.setMinimumHeight(160)
-            self.code_edit.setMinimumHeight(160)
-            self.resize(520, 340)
+            self.output_edit.setMinimumHeight(200)
+            self.code_edit.setMinimumHeight(200)
+            self.resize(600, 380)
 
     def _on_tab_changed(self, index: int) -> None:
         if index == self._last_tab_index:
