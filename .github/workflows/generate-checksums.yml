@@ -1,0 +1,35 @@
+name: Auto-generate checksums
+
+on:
+  push:
+    paths:
+      - "dist/**"
+
+permissions:
+  contents: write
+
+jobs:
+  checksums:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make checksum script executable
+        run: chmod +x tools/generate_checksums.sh
+
+      - name: Generate checksums
+        run: ./tools/generate_checksums.sh
+
+      - name: Commit updated checksums
+        run: |
+          if git diff --quiet; then
+            echo "No checksum changes detected"
+          else
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+            git add tools/checksums-latest.txt
+            git commit -m "chore: auto-update checksums"
+            git push
+          fi
