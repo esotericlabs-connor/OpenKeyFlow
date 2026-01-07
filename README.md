@@ -11,11 +11,6 @@ VERSION 1.0 OUT NOW
 
 Download for Windows (v1.0) here:
 
-Windows SHA256 Hash (OpenKeyFlow-v1.0.0-exe.zip):
-D285C00096AC355C4C81D357D5CB578BE7F044C562270241B326C0D144427AA0
-
-Windows SHA256 Hash (OpenKeyFlow-v1.0.0-installer.exe):
-
 ---
 
 ## Features
