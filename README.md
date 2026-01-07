@@ -9,8 +9,6 @@ OpenKeyFlow is a free, open source text expander (or text snippet) app — ideal
 
 VERSION 1.0 OUT NOW
 
-Download for Windows (v1.0) here:
-
 ---
 
 ## Features
