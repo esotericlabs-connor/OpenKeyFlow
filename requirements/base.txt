@@ -1,5 +1,9 @@
-PyQt5==5.15.10
-pyperclip==1.8.2
-Pillow==10.4.0
-cryptography==43.0.1
+cffi==2.0.0
+cryptography==46.0.5
+pillow==10.4.0
 platformdirs==4.2.2
+pycparser==3.0
+pyperclip==1.8.2
+pyqt5==5.15.10
+pyqt5-qt5==5.15.18
+pyqt5-sip==12.18.0
