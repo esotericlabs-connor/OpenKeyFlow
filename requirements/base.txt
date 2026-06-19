@@ -1,5 +1,5 @@
 cffi==2.0.0
-cryptography==46.0.7
+cryptography==48.0.1
 pillow==12.2.0
 platformdirs==4.2.2
 pycparser==3.0
