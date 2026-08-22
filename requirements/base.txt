@@ -1,6 +1,8 @@
 cffi==2.0.0
 cryptography==46.0.7
 pillow==12.3.0
+cryptography==50.0.0
+pillow==12.2.0
 platformdirs==4.2.2
 pycparser==3.0
 pyperclip==1.8.2
